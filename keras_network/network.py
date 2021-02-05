@@ -3,10 +3,14 @@ import copy
 import operator
 import math
 import itertools
+import io
+import base64
+import html
 
 from functools import reduce
 
 import tensorflow as tf
+import numpy as np
 
 from .utils import minimum, maximum, topological_sort
 
@@ -16,8 +20,10 @@ class Network:
     """
     def __init__(self, model):
         self._model = model
+        self._layers = topological_sort(self._model.layers)
+        self._layers_map = {layer.name: layer for layer in self._layers}
         self._level_ordering = None
-        self.layer_dict = {layer.name: layer for layer in self._model.layers}
+        self._svg_counter = 0
         self.minmax = (0, 0)
         self.input_bank_order = self.get_input_layers()
         self.num_input_layers = len(self.input_bank_order)
@@ -55,8 +61,8 @@ class Network:
         return getattr(self._model, attr)
 
     def __getitem__(self, layer_name):
-        return self.layer_dict.get(layer_name, None)
-        
+        return self._layers_map.get(layer_name, None)
+
     def tooltip(self, layer_name):
         return "tool tip"
 
@@ -65,6 +71,90 @@ class Network:
 
     def make_dummy_vector(self, layer_name):
         return [0, 0, 0, 0]
+
+    def make_image(self, layer_name, vector, colormap=None, config={}):
+        """
+        Given an activation name (or function), and an output vector, display
+        make and return an image widget.
+        """
+        #import keras.backend as K
+        from matplotlib import cm
+        import PIL
+        import PIL.ImageDraw
+
+        image = PIL.Image.new('RGBA', (100, 100), color="white")
+        return image
+
+        # FIXME:
+        # self is a layer from here down:
+
+        if self.vshape and self.vshape != self.shape:
+            vector = vector.reshape(self.vshape)
+        if len(vector.shape) > 2:
+            ## Drop dimensions of vector:
+            s = slice(None, None)
+            args = []
+            # The data is in the same format as Keras
+            # so we can ask Keras what that format is:
+            # ASSUMES: that the network that loaded the
+            # dataset has the same image_data_format as
+            # now:
+            if K.image_data_format() == 'channels_last':
+                for d in range(len(vector.shape)):
+                    if d in [0, 1]:
+                        args.append(s) # keep the first two
+                    else:
+                        args.append(self.feature) # pick which to use
+            else: # 'channels_first'
+                count = 0
+                for d in range(len(vector.shape)):
+                    if d in [0]:
+                        args.append(self.feature) # pick which to use
+                    else:
+                        if count < 2:
+                            args.append(s)
+                            count += 1
+            vector = vector[args]
+        vector = scale_output_for_image(vector, self.get_act_minmax(), truncate=True)
+        if len(vector.shape) == 1:
+            vector = vector.reshape((1, vector.shape[0]))
+        size = config.get("pixels_per_unit",1)
+        new_width = vector.shape[0] * size # in, pixels
+        new_height = vector.shape[1] * size # in, pixels
+        if colormap is None:
+            colormap = self.get_colormap()
+        if colormap is not None:
+            try:
+                cm_hot = cm.get_cmap(colormap)
+            except:
+                cm_hot = cm.get_cmap("RdGy")
+            vector = cm_hot(vector)
+        vector = np.uint8(vector * 255)
+        if max(vector.shape) <= self.max_draw_units:
+            # Need to make it bigger, to draw circles:
+            ## Make this value too small, and borders are blocky;
+            ## too big and borders are too thin
+            scale = int(250 / max(vector.shape))
+            size = size * scale
+            image = PIL.Image.new('RGBA', (new_height * scale, new_width * scale), color="white")
+            draw = PIL.ImageDraw.Draw(image)
+            for row in range(vector.shape[1]):
+                for col in range(vector.shape[0]):
+                    ## upper-left, lower-right:
+                    draw.rectangle((row * size, col * size,
+                                  (row + 1) * size - 1, (col + 1) * size - 1),
+                                 fill=tuple(vector[col][row]),
+                                 outline='black')
+        else:
+            image = PIL.Image.fromarray(vector)
+            image = image.resize((new_height, new_width))
+        ## If rotated, and has features, rotate it:
+        if config.get("svg_rotate", False):
+            output_shape = self.get_output_shape()
+            if ((isinstance(output_shape, tuple) and len(output_shape) >= 3) or
+                (self.vshape is not None and len(self.vshape) == 2)):
+                image = image.rotate(90, expand=1)
+        return image
 
     def picture(self, inputs=None, rotate=False, scale=None,
                 show_errors=False, show_targets=False, format="pil", class_id=None,
@@ -222,7 +312,7 @@ class Network:
                                              "image": self._image_to_uri(image),
                                              "width": width,
                                              "height": height,
-                                             "tooltip": self[layer_name].tooltip(),
+                                             "tooltip": self.tooltip(layer_name),
                                              "border_color": self._get_border_color(layer_name, config),
                                              "border_width": self._get_border_width(layer_name, config),
                                              "rx": cwidth - 1, # based on arrow width
@@ -261,7 +351,7 @@ class Network:
                                              "image": self._image_to_uri(image),
                                              "width": width,
                                              "height": height,
-                                             "tooltip": self[layer_name].tooltip(),
+                                             "tooltip": self.tooltip(layer_name),
                                              "border_color": self._get_border_color(layer_name, config),
                                              "border_width": self._get_border_width(layer_name, config),
                                              "rx": cwidth - 1, # based on arrow width
@@ -439,7 +529,7 @@ class Network:
                                                "image": self._image_to_uri(image),
                                                "width": width,
                                                "height": height,
-                                               "tooltip": self[layer_name].tooltip(),
+                                               "tooltip": self.tooltip(layer_name),
                                                "border_color": self._get_border_color(layer_name, config),
                                                "border_width": self._get_border_width(layer_name, config),
                                                "rx": cwidth - 1, # based on arrow width
@@ -500,11 +590,13 @@ class Network:
                                              "font_family": config["font_family"],
                                              "text_anchor": "start",
                 }])
-                output_shape = self[layer_name].get_output_shape()
+                output_shape = self.get_output_shape(layer_name)
                 if (isinstance(output_shape, tuple) and len(output_shape) == 4 and
                     self[layer_name].__class__.__name__ != "ImageLayer"):
                     features = str(output_shape[3])
-                    feature = str(self[layer_name].feature)
+                    # FIXME:
+                    #feature = str(self[layer_name].feature)
+                    feature = "label"
                     if config["svg_rotate"]:
                         struct.append(["label_svg", {"x": positioning[layer_name]["x"] + 5,
                                                      "y": positioning[layer_name]["y"] - 10 - 5,
@@ -539,7 +631,7 @@ class Network:
                                                      "font_family": config["font_family"],
                                                      "text_anchor": "start",
                         }])
-                if (self[layer_name].dropout > 0):
+                if False: # (self[layer_name].dropout > 0): FIXME:
                     struct.append(["label_svg", {"x": positioning[layer_name]["x"] - 1 * 2.0 - 18, # length of chars * 2.0
                                                  "y": positioning[layer_name]["y"] + 4,
                                                  "label": "o", # "&#10683;"
@@ -754,8 +846,11 @@ class Network:
         return svg_html
 
     def get_input_layers(self):
-        return [x for x in self._model.layers if self.kind(x.name) == "input"]
-    
+        return [x.name for x in self._layers if self.kind(x.name) == "input"]
+
+    def get_output_shape(self, layer_name=None):
+        return (10, 1)
+
     def incoming_layers(self, layer_name):
         layer = self[layer_name]
         layers = []
@@ -807,13 +902,13 @@ class Network:
             return self._level_ordering
         ## First, get a level for all layers:
         levels = {}
-        for layer in topological_sort(self.layers):
+        for layer in self._layers:
             level = max([levels[lay.name] for lay in self.incoming_layers(layer.name)] + [-1])
             levels[layer.name] = level + 1
         max_level = max(levels.values())
         ordering = []
         for i in range(max_level + 1): # input to output
-            layer_names = [layer.name for layer in self.layers if levels[layer.name] == i]
+            layer_names = [layer.name for layer in self._layers if levels[layer.name] == i]
             ordering.append([(name, False, [x.name for x in self.incoming_layers(name)])
                              for name in layer_names]) # (going_to/layer_name, anchor, coming_from)
         ## promote all output banks to last row:
@@ -926,6 +1021,17 @@ class Network:
                 ordering[level_num] = best[1]
             return ordering
 
+    def vshape(self, layer_name):
+        """
+        Find the vshape of layer.
+        """
+        #layer = self[layer_name]
+        #vshape = layer.vshape if layer.vshape else layer.shape if layer.shape else None
+        #if vshape is None:
+        #    vshape = layer.get_output_shape()
+        #return vshape
+        return (10, 1)
+
     def _pre_process_struct(self, inputs, config, ordering, targets):
         """
         Determine sizes and pre-compute images.
@@ -992,51 +1098,53 @@ class Network:
                         for in_name in self.input_bank_order:
                             v.append(self.make_dummy_vector(in_name))
                     else:
-                        in_layer = [layer for layer in self.layers if self.kind(layer.name) == "input"][0]
+                        in_layer = [layer for layer in self._layers if self.kind(layer.name) == "input"][0]
                         v = self.make_dummy_vector(in_layer)
-                if self[layer_name].model:
+                if True: # self[layer_name].model: # FIXME
                     orig_svg_rotate = self.config["svg_rotate"]
                     self.config["svg_rotate"] = config["svg_rotate"]
                     try:
                         image = self._propagate_to_image(layer_name, v)
                     except:
-                        image = self[layer_name].make_image(np.array(self.make_dummy_vector(layer_name)), config=config)
+                        image = self.make_image(layer_name, np.array(self.make_dummy_vector(layer_name)), config=config)
                     self.config["svg_rotate"] = orig_svg_rotate
                 else:
                     self.warn_once("WARNING: network is uncompiled; activations cannot be visualized")
-                    image = self[layer_name].make_image(np.array(self.make_dummy_vector(layer_name)), config=config)
+                    image = self.make_image(layer_name, np.array(self.make_dummy_vector(layer_name)), config=config)
                 (width, height) = image.size
                 images[layer_name] = image ## little image
                 if self.kind(layer_name) == "output":
                     if targets is not None:
                         ## Target image, targets set above:
-                        target_colormap = self[layer_name].colormap
+                        target_colormap = "grey" ## FIXME: self[layer_name].colormap
                         target_bank = targets[self.output_bank_order.index(layer_name)]
                         target_array = np.array(target_bank)
-                        target_image = self[layer_name].make_image(target_array, target_colormap, config)
+                        target_image = self.make_image(layer_name, target_array, target_colormap, config)
                         ## Error image, error set above:
                         error_colormap = get_error_colormap()
                         error_bank = errors[self.output_bank_order.index(layer_name)]
                         error_array = np.array(error_bank)
-                        error_image = self[layer_name].make_image(error_array, error_colormap, config)
+                        error_image = self.make_image(layer_name, error_array, error_colormap, config)
                         images[layer_name + "_errors"] = error_image
                         images[layer_name + "_targets"] = target_image
                     else:
                         images[layer_name + "_errors"] = image
                         images[layer_name + "_targets"] = image
                 ### Layer settings:
-                if self[layer_name].image_maxdim:
-                    image_maxdim = self[layer_name].image_maxdim
-                else:
-                    image_maxdim = config["image_maxdim"]
-                if self[layer_name].image_pixels_per_unit:
-                    image_pixels_per_unit = self[layer_name].image_pixels_per_unit
-                else:
-                    image_pixels_per_unit = config["image_pixels_per_unit"]
+                # FIXME:
+                #if self[layer_name].image_maxdim:
+                #    image_maxdim = self[layer_name].image_maxdim
+                #else:
+                image_maxdim = config["image_maxdim"]
+                # FIXME:
+                #if self[layer_name].image_pixels_per_unit:
+                #    image_pixels_per_unit = self[layer_name].image_pixels_per_unit
+                #else:
+                image_pixels_per_unit = config["image_pixels_per_unit"]
                 ## First, try based on shape:
                 #pwidth, pheight = np.array(image.size) * image_pixels_per_unit
                 vshape = self.vshape(layer_name)
-                if vshape is None or self[layer_name].keep_aspect_ratio:
+                if vshape is None: # FIXME or self[layer_name].keep_aspect_ratio:
                     pass ## let the image set the shape
                 elif len(vshape) == 1:
                     if vshape[0] is not None:
@@ -1056,11 +1164,12 @@ class Network:
                             width = vshape[1] * image_pixels_per_unit
                             height = image_pixels_per_unit
                 ## keep aspect ratio:
-                if self[layer_name].keep_aspect_ratio:
-                    scale = image_maxdim / max(width, height)
-                    image = image.resize((int(width * scale), int(height * scale)))
-                    width, height = image.size
-                else:
+                #if self[layer_name].keep_aspect_ratio:
+                #    scale = image_maxdim / max(width, height)
+                #    image = image.resize((int(width * scale), int(height * scale)))
+                #    width, height = image.size
+                #else:
+                if True: # FIXME
                     ## Change aspect ratio if too big/small
                     if width < image_pixels_per_unit:
                         width = image_pixels_per_unit
@@ -1114,7 +1223,7 @@ class Network:
         Returns a textual description of the weights for the SVG tooltip.
         """
         retval = "Weights from %s to %s" % (layer1.name, layer2.name)
-        for klayer in self._model.layers:
+        for klayer in self._layers:
             if klayer.name == layer2.name:
                 weights = klayer.get_weights()
                 for w in range(len(klayer.weights)):
