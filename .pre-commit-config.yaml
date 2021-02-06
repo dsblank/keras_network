@@ -1,0 +1,25 @@
+repos:
+-   repo: https://github.com/asottile/seed-isort-config
+    rev: v2.1.1
+    hooks:
+    -   id: seed-isort-config
+-   repo: https://github.com/timothycrosley/isort
+    files: jyrobot/**/*.py
+    rev: 4.3.21
+    hooks:
+    -   id: isort
+-   repo: https://github.com/ambv/black
+    rev: 19.10b0
+    files: jyrobot/**/*.py
+    hooks:
+    - id: black
+      args: [--safe]
+-   repo: https://gitlab.com/pycqa/flake8
+    rev: 3.7.9
+    files: jyrobot/**/*.py
+    hooks:
+    -   id: flake8
+        args: ['--config=.flake8']
+        additional_dependencies: ['flake8-coding==1.3.2', 'flake8-copyright==0.2.2']
+
+python_version: python3.9
