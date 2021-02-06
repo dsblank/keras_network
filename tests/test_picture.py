@@ -26,7 +26,6 @@ def test_squential():
 
 
 def test_graph():
-
     d1a = Input(8)
     d1b = Input(8)
     d1 = Concatenate()([d1a, d1b])

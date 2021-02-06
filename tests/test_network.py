@@ -51,12 +51,12 @@ def build_model1():
 
 
 @pytest.mark.parametrize("model_name", ["sequential", "model1"])
-def test_kind(model_name):
+def test_layer_type(model_name):
     model = build_model(model_name)
     network = Network(model)
 
     assert ["input", "hidden", "hidden", "hidden", "output"] == [
-        network.kind(layer.name) for layer in network._layers
+        network._get_layer_type(layer.name) for layer in network._layers
     ]
 
 
@@ -126,10 +126,9 @@ def test_with_data(model_name):
  '_optimize_ordering',
  '_pre_process_struct',
  '_svg_counter',
+ '_get_feature',
  'build_struct',
- 'feature',
  'input_bank_order',
- 'kind',
  'make_dummy_vector',
  'make_image',
  'max_draw_units',
