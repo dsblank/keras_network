@@ -23,6 +23,7 @@ import tensorflow as tf
 from matplotlib import cm
 
 from .utils import (
+    get_templates,
     maximum,
     minimum,
     scale_output_for_image,
@@ -43,7 +44,7 @@ class Network:
         # Make a mapping of names to layers:
         self._layers_map = {layer.name: layer for layer in self._layers}
         # Get the input bank names, in order:
-        self.input_bank_order = self.get_input_layers()
+        self.input_bank_order = self._get_input_layers()
         self.num_input_layers = len(self.input_bank_order)
         # Get the best (shortest path) between layers:
         self._level_ordering = self._get_level_ordering()
@@ -52,6 +53,9 @@ class Network:
         self.max_draw_units = 20
         self.feature = 0
         self.config = {
+            "name": "Keras Network", # for svg title
+            "class_id": "keras-network", # for svg network classid
+            "svg_id": "keras-network", # for svg id
             "font_size": 12,  # for svg
             "font_family": "monospace",  # for svg
             "border_top": 25,  # for svg
@@ -66,7 +70,7 @@ class Network:
             "border_width": "2",
             "border_color": "black",
             "show_targets": False,
-            "show_errors": False,
+            "show_loss": False,
             "pixels_per_unit": 1,
             "precision": 2,
             "svg_scale": None,  # for svg, 0 - 1, or None for optimal
@@ -87,37 +91,47 @@ class Network:
     def __getitem__(self, layer_name):
         return self._layers_map.get(layer_name, None)
 
-    def tooltip(self, layer_name):
-        return "tool tip"
-
-    def visible(self, layer_name):
-        return True
-
     def make_dummy_vector(self, layer_name, default_value=0.0):
         """
         This is in the easy to use human format (list of lists ...)
         """
         # layer = self[layer_name]
-        shape = self.get_output_shape(layer_name)
+        shape = self._get_output_shape(layer_name)
         # FIXME: for pictures give a vector
         if shape is None or (isinstance(shape, (list, tuple)) and None in shape):
             v = np.ones(100) * default_value
         else:
             v = np.ones(shape) * default_value
-        lo, hi = self.get_act_minmax(layer_name)
+        lo, hi = self._get_act_minmax(layer_name)
         v *= (lo + hi) / 2.0
         return v.tolist()
 
-    def get_colormap(self, layer_name):
+    def _get_input_layers(self):
+        return [x.name for x in self._layers if self.kind(x.name) == "input"]
+
+    def _get_output_shape(self, layer_name):
+        layer = self[layer_name]
+        if isinstance(layer.output_shape, list):
+            return (1,) + layer.output_shape[0][1:]
+        else:
+            return (1,) + layer.output_shape[1:]
+
+    def _get_tooltip(self, layer_name):
+        return "tool tip"
+
+    def _get_visible(self, layer_name):
+        return True
+
+    def _get_colormap(self, layer_name):
         return cm.get_cmap("RdGy")
 
-    def get_activation_name(self, layer):
+    def _get_activation_name(self, layer):
         if hasattr(layer, "activation"):
             names = layer.activation._keras_api_names
             if len(names) > 0 and "." in names[0]:
                 names[0].split(".")[-1]
 
-    def get_act_minmax(self, layer_name):
+    def _get_act_minmax(self, layer_name):
         """
         Get the activation (output) min/max for a layer.
 
@@ -130,7 +144,7 @@ class Network:
             layer = self[layer_name]
             if layer.__class__.__name__ == "Flatten":
                 in_layer = self.incoming_layers(layer_name)[0]
-                return self.get_act_minmax(in_layer.name)
+                return self._get_act_minmax(in_layer.name)
             elif self.kind(layer_name) == "input":
                 # try to get from dataset
                 # if self.network and len(self.network.dataset) > 0:
@@ -139,7 +153,7 @@ class Network:
                 # else:
                 return (-2, +2)
             else:  # try to get from activation function
-                activation = self.get_activation_name(layer)
+                activation = self._get_activation_name(layer)
                 if activation in ["tanh", "softsign"]:
                     return (-1, +1)
                 elif activation in ["sigmoid", "softmax", "hard_sigmoid"]:
@@ -153,6 +167,39 @@ class Network:
                     # Someday could sample the unknown activation function
                     # and provide reasonable values
                     return (-2, +2)
+
+    def _get_border_color(self, layer_name, config):
+        if config.get("highlights") and layer_name in config.get("highlights"):
+            return config["highlights"][layer_name]["border_color"]
+        else:
+            return config["border_color"]
+
+    def _get_border_width(self, layer_name, config):
+        if config.get("highlights") and layer_name in config.get("highlights"):
+            return config["highlights"][layer_name]["border_width"]
+        else:
+            return config["border_width"]
+
+    def _find_spacing(self, row, ordering, max_width):
+        """
+        Find the spacing for a row number
+        """
+        return max_width / (len(ordering[row]) + 1)
+
+    def describe_connection_to(self, layer1, layer2):
+        """
+        Returns a textual description of the weights for the SVG tooltip.
+        """
+        retval = "Weights from %s to %s" % (layer1.name, layer2.name)
+        for klayer in self._layers:
+            if klayer.name == layer2.name:
+                weights = klayer.get_weights()
+                for w in range(len(klayer.weights)):
+                    retval += "\n %s has shape %s" % (
+                        klayer.weights[w].name,
+                        weights[w].shape,
+                    )
+        return retval
 
     def make_image(self, layer_name, vector, colormap=None, config={}):
         """
@@ -193,7 +240,7 @@ class Network:
                             count += 1
             vector = vector[args]
         vector = scale_output_for_image(
-            vector, self.get_act_minmax(layer_name), truncate=True
+            vector, self._get_act_minmax(layer_name), truncate=True
         )
         if len(vector.shape) == 1:
             vector = vector.reshape((1, vector.shape[0]))
@@ -201,7 +248,7 @@ class Network:
         new_width = vector.shape[0] * size  # in, pixels
         new_height = vector.shape[1] * size  # in, pixels
         if colormap is None:
-            colormap = self.get_colormap(layer_name)
+            colormap = self._get_colormap(layer_name)
         if colormap is not None:
             try:
                 cm_hot = cm.get_cmap(colormap)
@@ -237,7 +284,7 @@ class Network:
             image = image.resize((new_height, new_width))
         # If rotated, and has features, rotate it:
         if config.get("svg_rotate", False):
-            output_shape = self.get_output_shape(layer_name)
+            output_shape = self._get_output_shape(layer_name)
             if (isinstance(output_shape, tuple) and len(output_shape) >= 3) or (
                 self.vshape is not None and len(self.vshape) == 2
             ):
@@ -249,7 +296,7 @@ class Network:
         inputs=None,
         rotate=False,
         scale=None,
-        show_errors=False,
+        show_loss=False,
         show_targets=False,
         format="pil",
         class_id=None,
@@ -264,7 +311,7 @@ class Network:
             inputs: input values to propagate
             rotate (bool): rotate picture to horizontal
             scale (float): scale the picture
-            show_errors (bool): show the errors in resulting picture
+            show_loss (bool): show the errors in resulting picture
             show_targets (bool): show the targets in resulting picture
             format (str): "html", "image", or "svg"
             minmax (tuple): provide override for input range (layer 0 only)
@@ -279,17 +326,14 @@ class Network:
             >>> net.picture([.5, .5])
             <IPython.core.display.HTML object>
         """
-        if class_id is not None:
-            print("WARNING: class_id given but ignored", file=sys.stderr)
-        r = random.randint(1, 1000000)
-        class_id = "picture-static-%s-%s" % (self.name, r)
+        class_id = self.config["class_id"]
         orig_rotate = self.config["svg_rotate"]
-        orig_show_errors = self.config["show_errors"]
+        orig_show_loss = self.config["show_loss"]
         orig_show_targets = self.config["show_targets"]
         orig_svg_scale = self.config["svg_scale"]
         orig_minmax = self.minmax
         self.config["svg_rotate"] = rotate
-        self.config["show_errors"] = show_errors
+        self.config["show_loss"] = show_loss
         self.config["show_targets"] = show_targets
         self.config["svg_scale"] = scale
         if minmax:
@@ -300,7 +344,7 @@ class Network:
         # else, leave minmax as None
         svg = self.to_svg(inputs=inputs, class_id=class_id, targets=targets, **kwargs)
         self.config["svg_rotate"] = orig_rotate
-        self.config["show_errors"] = orig_show_errors
+        self.config["show_loss"] = orig_show_loss
         self.config["show_targets"] = orig_show_targets
         self.config["svg_scale"] = orig_svg_scale
         self.minmax = orig_minmax
@@ -328,43 +372,12 @@ class Network:
         config = copy.copy(self.config)
         config.update(kwargs)
         struct = self.build_struct(inputs, class_id, config, targets)
-        # Define the SVG strings:
-        image_svg = """<rect x="{{rx}}" y="{{ry}}" width="{{rw}}" height="{{rh}}" style="fill:none;stroke:{{border_color}};stroke-width:{{border_width}}"/><image id="{netname}_{{name}}_{{svg_counter}}" class="{netname}_{{name}}" x="{{x}}" y="{{y}}" height="{{height}}" width="{{width}}" preserveAspectRatio="none" image-rendering="optimizeSpeed" xlink:href="{{image}}"><title>{{tooltip}}</title></image>""".format(
-            **{"netname": class_id if class_id is not None else self.name,}
-        )
-        line_svg = """<line x1="{{x1}}" y1="{{y1}}" x2="{{x2}}" y2="{{y2}}" stroke="{{arrow_color}}" stroke-width="{arrow_width}"><title>{{tooltip}}</title></line>""".format(
-            **config
-        )
-        arrow_svg = """<line x1="{{x1}}" y1="{{y1}}" x2="{{x2}}" y2="{{y2}}" stroke="{{arrow_color}}" stroke-width="{arrow_width}" marker-end="url(#arrow)"><title>{{tooltip}}</title></line>""".format(
-            **config
-        )
-        curve_svg = """" stroke="{{arrow_color}}" stroke-width="{arrow_width}" marker-end="url(#arrow)" fill="none" />""".format(
-            **config
-        )
-        arrow_rect = """<rect x="{rx}" y="{ry}" width="{rw}" height="{rh}" style="fill:white;stroke:none"><title>{tooltip}</title></rect>"""
-        label_svg = """<text x="{x}" y="{y}" font-family="{font_family}" font-size="{font_size}" text-anchor="{text_anchor}" fill="{font_color}" alignment-baseline="central" {transform}>{label}</text>"""
-        svg_head = """<svg id='{netname}' xmlns='http://www.w3.org/2000/svg' xmlns:xlink='http://www.w3.org/1999/xlink' image-rendering="pixelated" width="{top_width}px" height="{top_height}px">
- <g {svg_transform}>
-  <svg viewBox="0 0 {viewbox_width} {viewbox_height}" width="{width}px" height="{height}px">
-    <defs>
-        <marker id="arrow" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
-          <path d="M0,0 L0,6 L9,3 z" fill="{arrow_color}" />
-        </marker>
-    </defs>"""
-        templates = {
-            "image_svg": image_svg,
-            "line_svg": line_svg,
-            "arrow_svg": arrow_svg,
-            "arrow_rect": arrow_rect,
-            "label_svg": label_svg,
-            "svg_head": svg_head,
-            "curve": curve_svg,
-        }
+        templates = get_templates(config)
         # get the header:
         svg = None
         for (template_name, dict) in struct:
             if template_name == "svg_head":
-                svg = svg_head.format(**dict)
+                svg = templates["svg_head"].format(**dict)
         # build the rest:
         for index in range(len(struct)):
             (template_name, dict) = struct[index]
@@ -427,7 +440,7 @@ class Network:
                             "image": self._image_to_uri(image),
                             "width": width,
                             "height": height,
-                            "tooltip": self.tooltip(layer_name),
+                            "tooltip": self._get_tooltip(layer_name),
                             "border_color": self._get_border_color(layer_name, config),
                             "border_width": self._get_border_width(layer_name, config),
                             "rx": cwidth - 1,  # based on arrow width
@@ -455,8 +468,8 @@ class Network:
                 cwidth += width / 2
             # Then we need to add height for output layer again, plus a little bit
             cheight += row_heights[0] + 10  # max height of row, plus some
-        # Display error?
-        if config["show_errors"]:
+        # Display loss
+        if config["show_loss"]:
             spacing = self._find_spacing(0, ordering, max_width)
             # draw the row of errors:
             cwidth = 0
@@ -477,7 +490,7 @@ class Network:
                             "image": self._image_to_uri(image),
                             "width": width,
                             "height": height,
-                            "tooltip": self.tooltip(layer_name),
+                            "tooltip": self._get_tooltip(layer_name),
                             "border_color": self._get_border_color(layer_name, config),
                             "border_width": self._get_border_width(layer_name, config),
                             "rx": cwidth - 1,  # based on arrow width
@@ -506,7 +519,7 @@ class Network:
             # Then we need to add height for output layer again, plus a little bit
             cheight += row_heights[0] + 10  # max height of row, plus some
         # Show a separator that takes no space between output and targets/errors
-        if config["show_errors"] or config["show_targets"]:
+        if config["show_loss"] or config["show_targets"]:
             spacing = self._find_spacing(0, ordering, max_width)
             # Draw a line for each column in putput:
             cwidth = spacing / 2 + spacing / 2  # border + middle of first column
@@ -539,7 +552,7 @@ class Network:
             # See if there are any connections up:
             any_connections_up = False
             for (layer_name, anchor, fname) in level_tups:
-                if not self.visible(layer_name):
+                if not self._get_visible(layer_name):
                     continue
                 elif anchor:
                     continue
@@ -561,7 +574,7 @@ class Network:
             # Draw each column:
             for column in range(len(level_tups)):
                 (layer_name, anchor, fname) = level_tups[column]
-                if not self.visible(layer_name):
+                if not self._get_visible(layer_name):
                     if not hiding.get(
                         column, False
                     ):  # not already hiding, add some space:
@@ -714,7 +727,7 @@ class Network:
                         "image": self._image_to_uri(image),
                         "width": width,
                         "height": height,
-                        "tooltip": self.tooltip(layer_name),
+                        "tooltip": self._get_tooltip(layer_name),
                         "border_color": self._get_border_color(layer_name, config),
                         "border_width": self._get_border_width(layer_name, config),
                         "rx": cwidth - 1,  # based on arrow width
@@ -805,7 +818,7 @@ class Network:
                         },
                     ]
                 )
-                output_shape = self.get_output_shape(layer_name)
+                output_shape = self._get_output_shape(layer_name)
                 # FIXME: how to determine a layer that has images as input?
                 if (
                     isinstance(output_shape, tuple)
@@ -973,7 +986,7 @@ class Network:
                     {
                         "x": 10,  # really border_left
                         "y": cheight / 2,
-                        "label": self.name,
+                        "label": config["name"],
                         "font_size": config["font_size"] + 3,
                         "font_color": "black",
                         "font_family": config["font_family"],
@@ -988,7 +1001,7 @@ class Network:
                     {
                         "x": max_width / 2,
                         "y": config["border_top"] / 2,
-                        "label": self.name,
+                        "label": config["name"],
                         "font_size": config["font_size"] + 3,
                         "font_color": "black",
                         "font_family": config["font_family"],
@@ -1033,7 +1046,7 @@ class Network:
                     "viewbox_height": cheight,  # view port height
                     "width": scaled_width,  # actual pixels of image in page
                     "height": scaled_height,  # actual pixels of image in page
-                    "netname": self.name,
+                    "svg_id": config["svg_id"],
                     "top_width": top_width,
                     "top_height": top_height,
                     "arrow_color": config["arrow_color"],
@@ -1171,16 +1184,6 @@ class Network:
             points = list(reversed(points))
             svg_html = svgPath(points) + end_html
         return svg_html
-
-    def get_input_layers(self):
-        return [x.name for x in self._layers if self.kind(x.name) == "input"]
-
-    def get_output_shape(self, layer_name):
-        layer = self[layer_name]
-        if isinstance(layer.output_shape, list):
-            return (1,) + layer.output_shape[0][1:]
-        else:
-            return (1,) + layer.output_shape[1:]
 
     def incoming_layers(self, layer_name):
         layer = self[layer_name]
@@ -1387,7 +1390,7 @@ class Network:
         layer = self[layer_name]
         # vshape = layer.vshape if layer.vshape else layer.shape if layer.shape else None
         # if vshape is None:
-        vshape = self.get_output_shape(layer_name)
+        vshape = self._get_output_shape(layer_name)
         return vshape
 
     def _pre_process_struct(self, inputs, config, ordering, targets):
@@ -1422,7 +1425,7 @@ class Network:
             # For each column:
             for column in range(len(level_tups)):
                 (layer_name, anchor, fname) = level_tups[column]
-                if not self.visible(layer_name):
+                if not self._get_visible(layer_name):
                     if not hiding.get(column, False):
                         row_height = max(
                             row_height, config["vspace"]
@@ -1574,35 +1577,3 @@ class Network:
             data = data.decode("latin1")
         return "data:image/gif;base64,%s" % html.escape(data)
 
-    def _get_border_color(self, layer_name, config):
-        if config.get("highlights") and layer_name in config.get("highlights"):
-            return config["highlights"][layer_name]["border_color"]
-        else:
-            return config["border_color"]
-
-    def _get_border_width(self, layer_name, config):
-        if config.get("highlights") and layer_name in config.get("highlights"):
-            return config["highlights"][layer_name]["border_width"]
-        else:
-            return config["border_width"]
-
-    def _find_spacing(self, row, ordering, max_width):
-        """
-        Find the spacing for a row number
-        """
-        return max_width / (len(ordering[row]) + 1)
-
-    def describe_connection_to(self, layer1, layer2):
-        """
-        Returns a textual description of the weights for the SVG tooltip.
-        """
-        retval = "Weights from %s to %s" % (layer1.name, layer2.name)
-        for klayer in self._layers:
-            if klayer.name == layer2.name:
-                weights = klayer.get_weights()
-                for w in range(len(klayer.weights)):
-                    retval += "\n %s has shape %s" % (
-                        klayer.weights[w].name,
-                        weights[w].shape,
-                    )
-        return retval
