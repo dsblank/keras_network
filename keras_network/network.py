@@ -11,8 +11,9 @@ from functools import reduce
 
 import tensorflow as tf
 import numpy as np
+from matplotlib import cm
 
-from .utils import minimum, maximum, topological_sort
+from .utils import minimum, maximum, topological_sort, scale_output_for_image
 
 class Network:
     """
@@ -22,11 +23,13 @@ class Network:
         self._model = model
         self._layers = topological_sort(self._model.layers)
         self._layers_map = {layer.name: layer for layer in self._layers}
-        self._level_ordering = None
-        self._svg_counter = 0
-        self.minmax = (0, 0)
         self.input_bank_order = self.get_input_layers()
         self.num_input_layers = len(self.input_bank_order)
+        self._level_ordering = self._get_level_ordering()
+        self._svg_counter = 0
+        self.minmax = (0, 0)
+        self.max_draw_units = 20
+        self.feature = 0
         self.config = {
             "font_size": 12, # for svg
             "font_family": "monospace", # for svg
@@ -69,27 +72,91 @@ class Network:
     def visible(self, layer_name):
         return True
 
-    def make_dummy_vector(self, layer_name):
-        return [0, 0, 0, 0]
+    def make_dummy_vector(self, layer_name, default_value=0.0):
+        """
+        This is in the easy to use human format (list of lists ...)
+        """
+        #layer = self[layer_name]
+        shape = self.get_output_shape(layer_name)
+        ## FIXME: for pictures give a vector
+        if (shape is None or
+            (isinstance(shape, (list, tuple)) and None in shape)):
+            v = np.ones(100) * default_value
+        else:
+            v = np.ones(shape) * default_value
+        lo, hi = self.get_act_minmax(layer_name)
+        v *= (lo + hi) / 2.0
+        return v.tolist()
+
+    def get_colormap(self, layer_name):
+        return cm.get_cmap("RdGy")
+
+    def get_activation_name(self, layer):
+        if hasattr(layer, "activation"):
+            names = layer.activation._keras_api_names
+            if len(names) > 0 and "." in names[0]:
+                names[0].split(".")[-1]
+
+    def get_act_minmax(self, layer_name):
+        """
+        Get the activation (output) min/max for a layer.
+
+        Note: +/- 2 represents infinity
+        """
+        #if self.minmax is not None: ## allow override
+        #    return self.minmax
+        #else:
+        if True:
+            layer = self[layer_name]
+            if layer.__class__.__name__ == "Flatten":
+                in_layer = self.incoming_layers(layer_name)[0]
+                return self.get_act_minmax(in_layer.name)
+            elif self.kind(layer_name) == "input":
+                ## try to get from dataset
+                #if self.network and len(self.network.dataset) > 0:
+                #    bank_idx = self.network.input_bank_order.index(self.name)
+                #    return self.network.dataset._inputs_range[bank_idx]
+                #else:
+                return (-2,+2)
+            else: ## try to get from activation function
+                activation = self.get_activation_name(layer)
+                if activation in ["tanh", 'softsign']:
+                    return (-1,+1)
+                elif activation in ["sigmoid",
+                                    "softmax",
+                                    'hard_sigmoid']:
+                    return (0, +1)
+                elif activation in ["relu", 'elu', 'softplus']:
+                    return (0,+2)
+                elif activation in ["selu", "linear"]:
+                    return (-2,+2)
+                else: # default, or unknown activation function
+                    ## Enhancement:
+                    ## Someday could sample the unknown activation function
+                    ## and provide reasonable values
+                    return (-2,+2)
 
     def make_image(self, layer_name, vector, colormap=None, config={}):
         """
         Given an activation name (or function), and an output vector, display
         make and return an image widget.
         """
-        #import keras.backend as K
-        from matplotlib import cm
-        import PIL
-        import PIL.ImageDraw
+        import tensorflow.keras.backend as K
+        from PIL import Image, ImageDraw
 
-        image = PIL.Image.new('RGBA', (100, 100), color="white")
-        return image
+        #if random.random() < .33:
+        #    image = PIL.Image.new('RGBA', (100, 100), color="blue")
+        #elif random.random() < .67:
+        #    image = PIL.Image.new('RGBA', (100, 100), color="red")
+        #else:
+        #    image = PIL.Image.new('RGBA', (100, 100), color="green")
+        #return image
 
         # FIXME:
         # self is a layer from here down:
 
-        if self.vshape and self.vshape != self.shape:
-            vector = vector.reshape(self.vshape)
+        #if self.vshape and self.vshape != self.shape:
+        #    vector = vector.reshape(self.vshape)
         if len(vector.shape) > 2:
             ## Drop dimensions of vector:
             s = slice(None, None)
@@ -115,14 +182,14 @@ class Network:
                             args.append(s)
                             count += 1
             vector = vector[args]
-        vector = scale_output_for_image(vector, self.get_act_minmax(), truncate=True)
+        vector = scale_output_for_image(vector, self.get_act_minmax(layer_name), truncate=True)
         if len(vector.shape) == 1:
             vector = vector.reshape((1, vector.shape[0]))
         size = config.get("pixels_per_unit",1)
         new_width = vector.shape[0] * size # in, pixels
         new_height = vector.shape[1] * size # in, pixels
         if colormap is None:
-            colormap = self.get_colormap()
+            colormap = self.get_colormap(layer_name)
         if colormap is not None:
             try:
                 cm_hot = cm.get_cmap(colormap)
@@ -136,8 +203,8 @@ class Network:
             ## too big and borders are too thin
             scale = int(250 / max(vector.shape))
             size = size * scale
-            image = PIL.Image.new('RGBA', (new_height * scale, new_width * scale), color="white")
-            draw = PIL.ImageDraw.Draw(image)
+            image = Image.new('RGBA', (new_height * scale, new_width * scale), color="white")
+            draw = ImageDraw.Draw(image)
             for row in range(vector.shape[1]):
                 for col in range(vector.shape[0]):
                     ## upper-left, lower-right:
@@ -146,11 +213,11 @@ class Network:
                                  fill=tuple(vector[col][row]),
                                  outline='black')
         else:
-            image = PIL.Image.fromarray(vector)
+            image = Image.fromarray(vector)
             image = image.resize((new_height, new_width))
         ## If rotated, and has features, rotate it:
         if config.get("svg_rotate", False):
-            output_shape = self.get_output_shape()
+            output_shape = self.get_output_shape(layer_name)
             if ((isinstance(output_shape, tuple) and len(output_shape) >= 3) or
                 (self.vshape is not None and len(self.vshape) == 2)):
                 image = image.rotate(90, expand=1)
@@ -208,7 +275,7 @@ class Network:
         self.minmax = orig_minmax
         if format == "svg":
             return svg
-        elif format == "image":
+        elif format == "pil":
             return svg_to_image(svg)
 
 
@@ -287,7 +354,7 @@ class Network:
         return svg
 
     def build_struct(self, inputs, class_id, config, targets):
-        ordering = list(reversed(self._get_level_ordering())) # list of names per level, input to output
+        ordering = list(reversed(self._level_ordering)) # list of names per level, input to output
         max_width, max_height, row_heights, images, image_dims = self._pre_process_struct(inputs, config, ordering, targets)
         ### Now that we know the dimensions:
         struct = []
@@ -848,8 +915,12 @@ class Network:
     def get_input_layers(self):
         return [x.name for x in self._layers if self.kind(x.name) == "input"]
 
-    def get_output_shape(self, layer_name=None):
-        return (10, 1)
+    def get_output_shape(self, layer_name):
+        layer = self[layer_name]
+        if isinstance(layer.output_shape, list):
+            return (1,) + layer.output_shape[0][1:]
+        else:
+            return (1,) + layer.output_shape[1:]
 
     def incoming_layers(self, layer_name):
         layer = self[layer_name]
@@ -898,8 +969,6 @@ class Network:
 
         If anchor is True, this is just an anchor point.
         """
-        if self._level_ordering is not None:
-            return self._level_ordering
         ## First, get a level for all layers:
         levels = {}
         for layer in self._layers:
@@ -942,7 +1011,7 @@ class Network:
                         next_level = [(n, anchor) for (n, anchor, fname) in ordering[level + 1]]
                         if (layer.name, False) not in next_level:
                             ordering[level + 1].append((layer.name, True, name)) # add anchor point
-        self._level_ordering = ordering = self._optimize_ordering(ordering)
+        ordering = self._optimize_ordering(ordering)
         return ordering
 
     def _optimize_ordering(self, ordering):
@@ -1025,12 +1094,11 @@ class Network:
         """
         Find the vshape of layer.
         """
-        #layer = self[layer_name]
+        layer = self[layer_name]
         #vshape = layer.vshape if layer.vshape else layer.shape if layer.shape else None
         #if vshape is None:
-        #    vshape = layer.get_output_shape()
-        #return vshape
-        return (10, 1)
+        vshape = self.get_output_shape(layer_name)
+        return vshape
 
     def _pre_process_struct(self, inputs, config, ordering, targets):
         """
