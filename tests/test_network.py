@@ -1,0 +1,123 @@
+import pytest
+
+from keras_network import Network
+
+from tensorflow import keras
+from tensorflow.keras.datasets import mnist
+from tensorflow.keras.layers import Dense, Dropout, Input
+from tensorflow.keras.models import Sequential, Model
+from tensorflow.keras.optimizers import RMSprop
+
+def build_model(model_name):
+    if model_name == "sequential":
+        return build_sequential_model()
+    elif model_name == "model1":
+        return build_model1()
+
+def build_sequential_model():
+    model = Sequential()
+    model.add(Dense(128, activation="sigmoid", input_shape=(784,)))
+    model.add(Dense(128, activation="sigmoid"))
+    model.add(Dense(128, activation="sigmoid"))
+    model.add(Dense(10, activation="softmax"))
+    model.compile(
+        loss="categorical_crossentropy", optimizer=RMSprop(), metrics=["accuracy"]
+    )
+    return model
+
+def build_model1():
+    l0 = Input((784,))
+    l1 = Dense(128, activation="sigmoid")(l0)
+    l2 = Dense(128, activation="sigmoid")(l1)
+    l3 = Dense(128, activation="sigmoid")(l2)
+    l4 = Dense(10, activation="softmax")(l3)
+    model = Model(inputs=[l0], outputs=[l4])
+    model.compile(
+        loss="categorical_crossentropy", optimizer=RMSprop(), metrics=["accuracy"]
+    )
+    return model
+
+@pytest.mark.parametrize("model_name", ["sequential", "model1"])
+def test_kind(model_name):
+    model = build_model(model_name)
+    network = Network(model)
+
+    assert ["input", "hidden", "hidden", "hidden", "output"] == [network.kind(layer.name) for layer in network._layers]
+
+@pytest.mark.parametrize("model_name", ["sequential", "model1"])
+def test_describe(model_name):
+    model = build_model(model_name)
+    network = Network(model)
+
+    for i, layer in enumerate(network._layers[:-1]):
+        desc = network.describe_connection_to(network._layers[i],
+                                              network._layers[i+1])
+        assert ("Weights from %s" % layer.name) in desc
+
+@pytest.mark.parametrize("model_name", ["sequential", "model1"])
+def test_incoming_layers(model_name):
+    model = build_model(model_name)
+    network = Network(model)
+
+    for i, layer in enumerate(network._layers):
+        if i > 0:
+            input_layers = network.incoming_layers(network._layers[i].name)
+            assert [network._layers[i-1]] == input_layers, "i is %r" % i
+
+
+@pytest.mark.parametrize("model_name", ["sequential", "model1"])
+def test_with_data(model_name):
+    model = build_model(model_name)
+    network = Network(model)
+
+    # the data, shuffled and split between train and test sets
+    (x_train, y_train), (x_test, y_test) = mnist.load_data()
+
+    x_train = x_train.reshape(60000, 784)
+    x_test = x_test.reshape(10000, 784)
+    x_train = x_train.astype("float32")
+    x_test = x_test.astype("float32")
+    x_train /= 255
+    x_test /= 255
+
+    # convert class vectors to binary class matrices
+    y_train = keras.utils.to_categorical(y_train, 10)
+    y_test = keras.utils.to_categorical(y_test, 10)
+
+    network.predict(x_test)
+
+
+"""
+'_find_spacing',
+ '_get_act_minmax',
+ '_get_activation_name',
+ '_get_border_color',
+ '_get_border_width',
+ '_get_colormap',
+ '_get_feature',
+ '_get_input_layers',
+ '_get_keep_aspect_ratio',
+ '_get_level_ordering',
+ '_get_output_shape',
+ '_get_tooltip',
+ '_get_visible',
+ '_layers',
+ '_layers_map',
+ '_level_ordering',
+ '_model',
+ '_optimize_ordering',
+ '_pre_process_struct',
+ '_svg_counter',
+ 'build_struct',
+ 'feature',
+ 'input_bank_order',
+ 'kind',
+ 'make_dummy_vector',
+ 'make_image',
+ 'max_draw_units',
+ 'minmax',
+ 'num_input_layers',
+ 'outgoing_layers',
+ 'to_svg',
+ 'vshape']
+"""

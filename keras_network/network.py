@@ -8,7 +8,6 @@
 #
 # ******************************************************
 
-import base64
 import copy
 import html
 import io
@@ -24,8 +23,10 @@ from matplotlib import cm
 
 from .utils import (
     get_templates,
+    image_to_uri,
     maximum,
     minimum,
+    render_curve,
     scale_output_for_image,
     svg_to_image,
     topological_sort,
@@ -51,7 +52,6 @@ class Network:
         self._svg_counter = 0
         self.minmax = (0, 0)
         self.max_draw_units = 20
-        self.feature = 0
         self.config = {
             "name": "Keras Network", # for svg title
             "class_id": "keras-network", # for svg network classid
@@ -70,7 +70,7 @@ class Network:
             "border_width": "2",
             "border_color": "black",
             "show_targets": False,
-            "show_loss": False,
+            "show_error": False,
             "pixels_per_unit": 1,
             "precision": 2,
             "svg_scale": None,  # for svg, 0 - 1, or None for optimal
@@ -115,6 +115,15 @@ class Network:
             return (1,) + layer.output_shape[0][1:]
         else:
             return (1,) + layer.output_shape[1:]
+
+    def _get_feature(self, layer_name):
+        """
+        Which feature plane is selected to show? Defaults to 0
+        """
+        return 0
+
+    def _get_keep_aspect_ratio(self, layer_name):
+        return False
 
     def _get_tooltip(self, layer_name):
         return "tool tip"
@@ -228,12 +237,12 @@ class Network:
                     if d in [0, 1]:
                         args.append(s)  # keep the first two
                     else:
-                        args.append(self.feature)  # pick which to use
+                        args.append(self._get_feature(layer_name))  # pick which to use
             else:  # 'channels_first'
                 count = 0
                 for d in range(len(vector.shape)):
                     if d in [0]:
-                        args.append(self.feature)  # pick which to use
+                        args.append(self._get_feature(layer_name))  # pick which to use
                     else:
                         if count < 2:
                             args.append(s)
@@ -296,7 +305,7 @@ class Network:
         inputs=None,
         rotate=False,
         scale=None,
-        show_loss=False,
+        show_error=False,
         show_targets=False,
         format="pil",
         class_id=None,
@@ -311,7 +320,7 @@ class Network:
             inputs: input values to propagate
             rotate (bool): rotate picture to horizontal
             scale (float): scale the picture
-            show_loss (bool): show the errors in resulting picture
+            show_error (bool): show the output error in resulting picture
             show_targets (bool): show the targets in resulting picture
             format (str): "html", "image", or "svg"
             minmax (tuple): provide override for input range (layer 0 only)
@@ -328,12 +337,12 @@ class Network:
         """
         class_id = self.config["class_id"]
         orig_rotate = self.config["svg_rotate"]
-        orig_show_loss = self.config["show_loss"]
+        orig_show_error = self.config["show_error"]
         orig_show_targets = self.config["show_targets"]
         orig_svg_scale = self.config["svg_scale"]
         orig_minmax = self.minmax
         self.config["svg_rotate"] = rotate
-        self.config["show_loss"] = show_loss
+        self.config["show_error"] = show_error
         self.config["show_targets"] = show_targets
         self.config["svg_scale"] = scale
         if minmax:
@@ -344,7 +353,7 @@ class Network:
         # else, leave minmax as None
         svg = self.to_svg(inputs=inputs, class_id=class_id, targets=targets, **kwargs)
         self.config["svg_rotate"] = orig_rotate
-        self.config["show_loss"] = orig_show_loss
+        self.config["show_error"] = orig_show_error
         self.config["show_targets"] = orig_show_targets
         self.config["svg_scale"] = orig_svg_scale
         self.minmax = orig_minmax
@@ -394,7 +403,7 @@ class Network:
                     dict["transform"] = ""
                 if template_name == "curve":
                     if dict["drawn"] == False:
-                        curve_svg = self._render_curve(
+                        curve_svg = render_curve(
                             dict, struct[index + 1 :], templates[template_name], config
                         )
                         svg += curve_svg
@@ -437,7 +446,7 @@ class Network:
                             "svg_counter": self._svg_counter,
                             "x": cwidth,
                             "y": cheight,
-                            "image": self._image_to_uri(image),
+                            "image": image_to_uri(image),
                             "width": width,
                             "height": height,
                             "tooltip": self._get_tooltip(layer_name),
@@ -468,10 +477,10 @@ class Network:
                 cwidth += width / 2
             # Then we need to add height for output layer again, plus a little bit
             cheight += row_heights[0] + 10  # max height of row, plus some
-        # Display loss
-        if config["show_loss"]:
+        # Display error
+        if config["show_error"]:
             spacing = self._find_spacing(0, ordering, max_width)
-            # draw the row of errors:
+            # draw the row of errores:
             cwidth = 0
             for (layer_name, anchor, fname) in ordering[0]:  # no anchors in output
                 if layer_name + "_errors" not in images:
@@ -487,7 +496,7 @@ class Network:
                             "svg_counter": self._svg_counter,
                             "x": cwidth,
                             "y": cheight,
-                            "image": self._image_to_uri(image),
+                            "image": image_to_uri(image),
                             "width": width,
                             "height": height,
                             "tooltip": self._get_tooltip(layer_name),
@@ -507,7 +516,7 @@ class Network:
                         {
                             "x": cwidth + width + 5,
                             "y": cheight + height / 2 + 2,
-                            "label": "errors",
+                            "label": "error",
                             "font_size": config["font_size"],
                             "font_color": "black",
                             "font_family": config["font_family"],
@@ -519,7 +528,7 @@ class Network:
             # Then we need to add height for output layer again, plus a little bit
             cheight += row_heights[0] + 10  # max height of row, plus some
         # Show a separator that takes no space between output and targets/errors
-        if config["show_loss"] or config["show_targets"]:
+        if config["show_error"] or config["show_targets"]:
             spacing = self._find_spacing(0, ordering, max_width)
             # Draw a line for each column in putput:
             cwidth = spacing / 2 + spacing / 2  # border + middle of first column
@@ -724,7 +733,7 @@ class Network:
                         "svg_counter": self._svg_counter,
                         "x": cwidth,
                         "y": cheight,
-                        "image": self._image_to_uri(image),
+                        "image": image_to_uri(image),
                         "width": width,
                         "height": height,
                         "tooltip": self._get_tooltip(layer_name),
@@ -827,8 +836,7 @@ class Network:
                 ):
                     features = str(output_shape[3])
                     # FIXME:
-                    # feature = str(self[layer_name].feature)
-                    feature = "label"
+                    feature = str(self._get_feature(layer_name))
                     if config["svg_rotate"]:
                         struct.append(
                             [
@@ -1057,134 +1065,6 @@ class Network:
         )
         return struct
 
-    def _render_curve(self, start, struct, end_svg, config):
-        """
-        Collect and render points on the line/curve.
-        """
-
-        class Line:
-            """
-            Properties of a line
-
-            Arguments:
-                pointA (array) [x,y]: coordinates
-                pointB (array) [x,y]: coordinates
-
-            Returns:
-                Line: { length: l, angle: a }
-            """
-
-            def __init__(self, pointA, pointB):
-                lengthX = pointB[0] - pointA[0]
-                lengthY = pointB[1] - pointA[1]
-                self.length = math.sqrt(math.pow(lengthX, 2) + math.pow(lengthY, 2))
-                self.angle = math.atan2(lengthY, lengthX)
-
-        def controlPoint(current, previous_point, next_point, reverse=False):
-            """
-            # Position of a control point
-            # I:  - current (array) [x, y]: current point coordinates
-            #     - previous (array) [x, y]: previous point coordinates
-            #     - next (array) [x, y]: next point coordinates
-            #     - reverse (boolean, optional): sets the direction
-            # O:  - (array) [x,y]: a tuple of coordinates
-            """
-            # When 'current' is the first or last point of the array
-            # 'previous' or 'next' don't exist.
-            # Replace with 'current'
-            p = previous_point or current
-            n = next_point or current
-
-            #  // Properties of the opposed-line
-            o = Line(p, n)
-
-            # // If is end-control-point, add PI to the angle to go backward
-            angle = o.angle + (math.pi if reverse else 0)
-            length = o.length * config["svg_smoothing"]
-
-            # // The control point position is relative to the current point
-            x = current[0] + math.cos(angle) * length
-            y = current[1] + math.sin(angle) * length
-            return (x, y)
-
-        def bezier(points, index):
-            """
-            Create the bezier curve command
-
-            Arguments:
-                points: complete array of points coordinates
-                index: index of 'point' in the array 'a'
-
-            Returns:
-                String of current path
-            """
-            current = points[index]
-            if index == 0:
-                return "M %s,%s " % (current[0], current[1])
-            # start control point
-            prev1 = points[index - 1] if index >= 1 else None
-            prev2 = points[index - 2] if index >= 2 else None
-            next1 = points[index + 1] if index < len(points) - 1 else None
-            cps = controlPoint(prev1, prev2, current, False)
-            # end control point
-            cpe = controlPoint(current, prev1, next1, True)
-            return "C %s,%s %s,%s, %s,%s " % (
-                cps[0],
-                cps[1],
-                cpe[0],
-                cpe[1],
-                current[0],
-                current[1],
-            )
-
-        def svgPath(points):
-            """
-            // Render the svg <path> element
-            // I:  - points (array): points coordinates
-            //     - command (function)
-            //       I:  - point (array) [x,y]: current point coordinates
-            //           - i (integer): index of 'point' in the array 'a'
-            //           - a (array): complete array of points coordinates
-            //       O:  - (string) a svg path command
-            // O:  - (string): a Svg <path> element
-            """
-            # build the d attributes by looping over the points
-            return '<path d="' + (
-                "".join([bezier(points, i) for i in range(len(points))])
-            )
-
-        points = [
-            (start["x2"], start["y2"]),
-            (start["x1"], start["y1"]),
-        ]  # may be direct line
-        start["drawn"] = True
-        for (template, dict) in struct:
-            # anchor! come in pairs
-            if (
-                (template == "curve")
-                and (dict["drawn"] == False)
-                and points[-1] == (dict["x2"], dict["y2"])
-            ):
-                points.append((dict["x1"], dict["y1"]))
-                dict["drawn"] = True
-        end_html = end_svg.format(**start)
-        if len(points) == 2:  # direct, no anchors, no curve:
-            svg_html = (
-                """<path d="M {sx} {sy} L {ex} {ey} """.format(
-                    **{
-                        "sx": points[-1][0],
-                        "sy": points[-1][1],
-                        "ex": points[0][0],
-                        "ey": points[0][1],
-                    }
-                )
-                + end_html
-            )
-        else:  # construct curve, at least 4 points
-            points = list(reversed(points))
-            svg_html = svgPath(points) + end_html
-        return svg_html
-
     def incoming_layers(self, layer_name):
         layer = self[layer_name]
         layers = []
@@ -1406,7 +1286,7 @@ class Network:
         image_dims = {}
         # if targets, then need to propagate for error:
         if targets is not None:
-            outputs = self.propagate(inputs)
+            outputs = self.predict(inputs)
             if len(self.output_bank_order) == 1:
                 targets = [targets]
                 errors = (np.array(outputs) - np.array(targets)).tolist()
@@ -1521,7 +1401,7 @@ class Network:
                 # First, try based on shape:
                 # pwidth, pheight = np.array(image.size) * image_pixels_per_unit
                 vshape = self.vshape(layer_name)
-                if vshape is None:  # FIXME or self[layer_name].keep_aspect_ratio:
+                if vshape is None or self._get_keep_aspect_ratio(layer_name):
                     pass  # let the image set the shape
                 elif len(vshape) == 1:
                     if vshape[0] is not None:
@@ -1541,12 +1421,11 @@ class Network:
                             width = vshape[1] * image_pixels_per_unit
                             height = image_pixels_per_unit
                 # keep aspect ratio:
-                # if self[layer_name].keep_aspect_ratio:
-                #    scale = image_maxdim / max(width, height)
-                #    image = image.resize((int(width * scale), int(height * scale)))
-                #    width, height = image.size
-                # else:
-                if True:  # FIXME
+                if self._get_keep_aspect_ratio(layer_name):
+                   scale = image_maxdim / max(width, height)
+                   image = image.resize((int(width * scale), int(height * scale)))
+                   width, height = image.size
+                else:
                     # Change aspect ratio if too big/small
                     if width < image_pixels_per_unit:
                         width = image_pixels_per_unit
@@ -1563,17 +1442,3 @@ class Network:
             row_heights.append(row_height)
             max_width = max(max_width, row_width)  # of all rows
         return max_width, max_height, row_heights, images, image_dims
-
-    def _image_to_uri(self, img_src):
-        # Convert to binary data:
-        b = io.BytesIO()
-        try:
-            img_src.save(b, format="gif")
-        except Exception:
-            return ""
-        data = b.getvalue()
-        data = base64.b64encode(data)
-        if not isinstance(data, str):
-            data = data.decode("latin1")
-        return "data:image/gif;base64,%s" % html.escape(data)
-

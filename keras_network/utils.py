@@ -9,9 +9,29 @@
 # ******************************************************
 
 import io
+import base64
+import html
 
 import numpy as np
 
+
+class Line:
+    """
+    Properties of a line
+
+    Arguments:
+        pointA (array) [x,y]: coordinates
+        pointB (array) [x,y]: coordinates
+
+    Returns:
+        Line: { length: l, angle: a }
+    """
+
+    def __init__(self, pointA, pointB):
+        lengthX = pointB[0] - pointA[0]
+        lengthY = pointB[1] - pointA[1]
+        self.length = math.sqrt(math.pow(lengthX, 2) + math.pow(lengthY, 2))
+        self.angle = math.atan2(lengthY, lengthX)
 
 def minimum(seq):
     """
@@ -221,3 +241,126 @@ def get_templates(config):
         "curve": curve_svg,
     }
     return templates
+
+def image_to_uri(img_src):
+    # Convert to binary data:
+    b = io.BytesIO()
+    try:
+        img_src.save(b, format="gif")
+    except Exception:
+        return ""
+    data = b.getvalue()
+    data = base64.b64encode(data)
+    if not isinstance(data, str):
+        data = data.decode("latin1")
+    return "data:image/gif;base64,%s" % html.escape(data)
+
+def controlPoint(current, previous_point, next_point, reverse=False):
+    """
+    # Position of a control point
+    # I:  - current (array) [x, y]: current point coordinates
+    #     - previous (array) [x, y]: previous point coordinates
+    #     - next (array) [x, y]: next point coordinates
+    #     - reverse (boolean, optional): sets the direction
+    # O:  - (array) [x,y]: a tuple of coordinates
+    """
+    # When 'current' is the first or last point of the array
+    # 'previous' or 'next' don't exist.
+    # Replace with 'current'
+    p = previous_point or current
+    n = next_point or current
+
+    #  // Properties of the opposed-line
+    o = Line(p, n)
+
+    # // If is end-control-point, add PI to the angle to go backward
+    angle = o.angle + (math.pi if reverse else 0)
+    length = o.length * config["svg_smoothing"]
+
+    # // The control point position is relative to the current point
+    x = current[0] + math.cos(angle) * length
+    y = current[1] + math.sin(angle) * length
+    return (x, y)
+
+def bezier(points, index):
+    """
+    Create the bezier curve command
+
+    Arguments:
+        points: complete array of points coordinates
+        index: index of 'point' in the array 'a'
+
+    Returns:
+        String of current path
+    """
+    current = points[index]
+    if index == 0:
+        return "M %s,%s " % (current[0], current[1])
+    # start control point
+    prev1 = points[index - 1] if index >= 1 else None
+    prev2 = points[index - 2] if index >= 2 else None
+    next1 = points[index + 1] if index < len(points) - 1 else None
+    cps = controlPoint(prev1, prev2, current, False)
+    # end control point
+    cpe = controlPoint(current, prev1, next1, True)
+    return "C %s,%s %s,%s, %s,%s " % (
+        cps[0],
+        cps[1],
+        cpe[0],
+        cpe[1],
+        current[0],
+        current[1],
+    )
+
+def svgPath(points):
+    """
+    // Render the svg <path> element
+    // I:  - points (array): points coordinates
+    //     - command (function)
+    //       I:  - point (array) [x,y]: current point coordinates
+    //           - i (integer): index of 'point' in the array 'a'
+    //           - a (array): complete array of points coordinates
+    //       O:  - (string) a svg path command
+    // O:  - (string): a Svg <path> element
+    """
+    # build the d attributes by looping over the points
+    return '<path d="' + (
+        "".join([bezier(points, i) for i in range(len(points))])
+    )
+
+def render_curve(start, struct, end_svg, config):
+    """
+    Collect and render points on the line/curve.
+    """
+    points = [
+        (start["x2"], start["y2"]),
+        (start["x1"], start["y1"]),
+    ]  # may be direct line
+    start["drawn"] = True
+    for (template, dict) in struct:
+        # anchor! come in pairs
+        if (
+            (template == "curve")
+            and (dict["drawn"] == False)
+            and points[-1] == (dict["x2"], dict["y2"])
+        ):
+            points.append((dict["x1"], dict["y1"]))
+            dict["drawn"] = True
+    end_html = end_svg.format(**start)
+    if len(points) == 2:  # direct, no anchors, no curve:
+        svg_html = (
+            """<path d="M {sx} {sy} L {ex} {ey} """.format(
+                **{
+                    "sx": points[-1][0],
+                    "sy": points[-1][1],
+                    "ex": points[0][0],
+                    "ey": points[0][1],
+                }
+            )
+            + end_html
+        )
+    else:  # construct curve, at least 4 points
+        points = list(reversed(points))
+        svg_html = svgPath(points) + end_html
+    return svg_html
+
