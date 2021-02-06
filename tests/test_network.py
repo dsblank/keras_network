@@ -1,18 +1,29 @@
+# -*- coding: utf-8 -*-
+# ******************************************************
+# kerasnet: Keras model wrapper with visualizations
+#
+# Copyright (c) 2021 Douglas S. Blank
+#
+# https://github.com/dsblank/kerasnet
+#
+# ******************************************************
+
 import pytest
-
-from keras_network import Network
-
 from tensorflow import keras
 from tensorflow.keras.datasets import mnist
-from tensorflow.keras.layers import Dense, Dropout, Input
-from tensorflow.keras.models import Sequential, Model
+from tensorflow.keras.layers import Dense, Input
+from tensorflow.keras.models import Model, Sequential
 from tensorflow.keras.optimizers import RMSprop
+
+from kerasnet import Network
+
 
 def build_model(model_name):
     if model_name == "sequential":
         return build_sequential_model()
     elif model_name == "model1":
         return build_model1()
+
 
 def build_sequential_model():
     model = Sequential()
@@ -24,6 +35,7 @@ def build_sequential_model():
         loss="categorical_crossentropy", optimizer=RMSprop(), metrics=["accuracy"]
     )
     return model
+
 
 def build_model1():
     l0 = Input((784,))
@@ -37,12 +49,16 @@ def build_model1():
     )
     return model
 
+
 @pytest.mark.parametrize("model_name", ["sequential", "model1"])
 def test_kind(model_name):
     model = build_model(model_name)
     network = Network(model)
 
-    assert ["input", "hidden", "hidden", "hidden", "output"] == [network.kind(layer.name) for layer in network._layers]
+    assert ["input", "hidden", "hidden", "hidden", "output"] == [
+        network.kind(layer.name) for layer in network._layers
+    ]
+
 
 @pytest.mark.parametrize("model_name", ["sequential", "model1"])
 def test_describe(model_name):
@@ -50,9 +66,11 @@ def test_describe(model_name):
     network = Network(model)
 
     for i, layer in enumerate(network._layers[:-1]):
-        desc = network.describe_connection_to(network._layers[i],
-                                              network._layers[i+1])
+        desc = network.describe_connection_to(
+            network._layers[i], network._layers[i + 1]
+        )
         assert ("Weights from %s" % layer.name) in desc
+
 
 @pytest.mark.parametrize("model_name", ["sequential", "model1"])
 def test_incoming_layers(model_name):
@@ -62,7 +80,7 @@ def test_incoming_layers(model_name):
     for i, layer in enumerate(network._layers):
         if i > 0:
             input_layers = network.incoming_layers(network._layers[i].name)
-            assert [network._layers[i-1]] == input_layers, "i is %r" % i
+            assert [network._layers[i - 1]] == input_layers, "i is %r" % i
 
 
 @pytest.mark.parametrize("model_name", ["sequential", "model1"])

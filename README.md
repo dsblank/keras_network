@@ -1,4 +1,4 @@
-# keras_network
+# kerasnet
 
 A Keras model wrapper with visualizations
 

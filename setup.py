@@ -1,15 +1,15 @@
 # -*- coding: utf-8 -*-
 # ******************************************************
-# keras_network: Keras model wrapper with visualizations
+# kerasnet: Keras model wrapper with visualizations
 #
 # Copyright (c) 2021 Douglas S. Blank
 #
-# https://github.com/dsblank/keras_network
+# https://github.com/dsblank/kerasnet
 #
 # ******************************************************
 
 """
-keras_network setup
+kerasnet setup
 """
 import io
 import os
@@ -19,7 +19,7 @@ import setuptools
 HERE = os.path.abspath(os.path.dirname(__file__))
 
 # The name of the project
-name = "keras_network"
+name = "kerasnet"
 
 
 # Get our version
@@ -34,7 +34,7 @@ def get_version(file, name="__version__"):
     return version_ns[name]
 
 
-version = get_version(os.path.join(HERE, "keras_network/_version.py"))
+version = get_version(os.path.join(HERE, "kerasnet/_version.py"))
 
 with open("README.md", "r") as fh:
     long_description = fh.read()

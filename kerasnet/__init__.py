@@ -1,11 +1,11 @@
 # -*- coding: utf-8 -*-
 # ******************************************************
-# keras_network: Keras model wrapper with visualizations
+# kerasnet: Keras model wrapper with visualizations
 #
 # Copyright (c) 2021 Douglas S. Blank
 #
-# https://github.com/dsblank/keras_network
+# https://github.com/dsblank/kerasnet
 #
 # ******************************************************
 
-from .network import Network
+from .network import Network  # noqa: F401

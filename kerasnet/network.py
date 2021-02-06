@@ -1,31 +1,27 @@
 # -*- coding: utf-8 -*-
 # ******************************************************
-# keras_network: Keras model wrapper with visualizations
+# kerasnet: Keras model wrapper with visualizations
 #
 # Copyright (c) 2021 Douglas S. Blank
 #
-# https://github.com/dsblank/keras_network
+# https://github.com/dsblank/kerasnet
 #
 # ******************************************************
 
 import copy
 import html
-import io
 import itertools
 import math
 import operator
-import random
 from functools import reduce
 
 import numpy as np
-import tensorflow as tf
 from matplotlib import cm
 
 from .utils import (
+    get_error_colormap,
     get_templates,
     image_to_uri,
-    maximum,
-    minimum,
     render_curve,
     scale_output_for_image,
     svg_to_image,
@@ -53,9 +49,9 @@ class Network:
         self.minmax = (0, 0)
         self.max_draw_units = 20
         self.config = {
-            "name": "Keras Network", # for svg title
-            "class_id": "keras-network", # for svg network classid
-            "svg_id": "keras-network", # for svg id
+            "name": "Keras Network",  # for svg title
+            "class_id": "keras-network",  # for svg network classid
+            "svg_id": "keras-network",  # for svg id
             "font_size": 12,  # for svg
             "font_family": "monospace",  # for svg
             "border_top": 25,  # for svg
@@ -98,7 +94,7 @@ class Network:
         # layer = self[layer_name]
         shape = self._get_output_shape(layer_name)
         # FIXME: for pictures give a vector
-        if shape is None or (isinstance(shape, (list, tuple)) and None in shape):
+        if (shape is None) or (isinstance(shape, (list, tuple)) and None in shape):
             v = np.ones(100) * default_value
         else:
             v = np.ones(shape) * default_value
@@ -402,9 +398,12 @@ class Network:
                 else:
                     dict["transform"] = ""
                 if template_name == "curve":
-                    if dict["drawn"] == False:
+                    if not dict["drawn"]:
                         curve_svg = render_curve(
-                            dict, struct[index + 1 :], templates[template_name], config
+                            dict,
+                            struct[(index + 1) :],  # noqa: E203
+                            templates[template_name],
+                            config,
                         )
                         svg += curve_svg
                 else:
@@ -686,7 +685,7 @@ class Network:
                                 positioning[layer_name]["y"]
                                 + positioning[layer_name]["height"]
                             )
-                            tootip = "TODO"
+                            tooltip = "TODO"
                             struct.append(
                                 [
                                     "curve",
@@ -1031,7 +1030,7 @@ class Network:
                 scale_value = config["svg_max_width"] / max(cheight, max_width)
             else:
                 scale_value = config["svg_preferred_size"] / max(cheight, max_width)
-        svg_scale = "%s%%" % int(scale_value * 100)
+        # svg_scale = "%s%%" % int(scale_value * 100)
         scaled_width = max_width * scale_value
         scaled_height = cheight * scale_value
         # Need a top-level width, height because Jupyter peeks at it
@@ -1143,7 +1142,7 @@ class Network:
                     index += 1
         # insert anchor points for any in next level
         # that doesn't go to a bank in this level
-        order_cache = {}
+        # order_cache = {}
         for level in range(len(ordering)):  # input to output
             tuples = ordering[level]
             for (name, anchor, fname) in tuples:
@@ -1267,7 +1266,7 @@ class Network:
         """
         Find the vshape of layer.
         """
-        layer = self[layer_name]
+        # layer = self[layer_name]
         # vshape = layer.vshape if layer.vshape else layer.shape if layer.shape else None
         # if vshape is None:
         vshape = self._get_output_shape(layer_name)
@@ -1422,9 +1421,9 @@ class Network:
                             height = image_pixels_per_unit
                 # keep aspect ratio:
                 if self._get_keep_aspect_ratio(layer_name):
-                   scale = image_maxdim / max(width, height)
-                   image = image.resize((int(width * scale), int(height * scale)))
-                   width, height = image.size
+                    scale = image_maxdim / max(width, height)
+                    image = image.resize((int(width * scale), int(height * scale)))
+                    width, height = image.size
                 else:
                     # Change aspect ratio if too big/small
                     if width < image_pixels_per_unit:

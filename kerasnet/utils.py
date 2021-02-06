@@ -1,16 +1,17 @@
 # -*- coding: utf-8 -*-
 # ******************************************************
-# keras_network: Keras model wrapper with visualizations
+# kerasnet: Keras model wrapper with visualizations
 #
 # Copyright (c) 2021 Douglas S. Blank
 #
-# https://github.com/dsblank/keras_network
+# https://github.com/dsblank/kerasnet
 #
 # ******************************************************
 
-import io
 import base64
 import html
+import io
+import math
 
 import numpy as np
 
@@ -32,6 +33,11 @@ class Line:
         lengthY = pointB[1] - pointA[1]
         self.length = math.sqrt(math.pow(lengthX, 2) + math.pow(lengthY, 2))
         self.angle = math.atan2(lengthY, lengthX)
+
+
+def get_error_colormap():
+    return "FIXME"
+
 
 def minimum(seq):
     """
@@ -216,7 +222,7 @@ def get_templates(config):
         **config
     )
     arrow_svg = """<line x1="{{x1}}" y1="{{y1}}" x2="{{x2}}" y2="{{y2}}" stroke="{{arrow_color}}" stroke-width="{arrow_width}" marker-end="url(#arrow)"><title>{{tooltip}}</title></line>""".format(
-            **config
+        **config
     )
     curve_svg = """" stroke="{{arrow_color}}" stroke-width="{arrow_width}" marker-end="url(#arrow)" fill="none" />""".format(
         **config
@@ -242,6 +248,7 @@ def get_templates(config):
     }
     return templates
 
+
 def image_to_uri(img_src):
     # Convert to binary data:
     b = io.BytesIO()
@@ -255,7 +262,8 @@ def image_to_uri(img_src):
         data = data.decode("latin1")
     return "data:image/gif;base64,%s" % html.escape(data)
 
-def controlPoint(current, previous_point, next_point, reverse=False):
+
+def controlPoint(config, current, previous_point, next_point, reverse=False):
     """
     # Position of a control point
     # I:  - current (array) [x, y]: current point coordinates
@@ -282,7 +290,8 @@ def controlPoint(current, previous_point, next_point, reverse=False):
     y = current[1] + math.sin(angle) * length
     return (x, y)
 
-def bezier(points, index):
+
+def bezier(config, points, index):
     """
     Create the bezier curve command
 
@@ -300,9 +309,9 @@ def bezier(points, index):
     prev1 = points[index - 1] if index >= 1 else None
     prev2 = points[index - 2] if index >= 2 else None
     next1 = points[index + 1] if index < len(points) - 1 else None
-    cps = controlPoint(prev1, prev2, current, False)
+    cps = controlPoint(config, prev1, prev2, current, False)
     # end control point
-    cpe = controlPoint(current, prev1, next1, True)
+    cpe = controlPoint(config, current, prev1, next1, True)
     return "C %s,%s %s,%s, %s,%s " % (
         cps[0],
         cps[1],
@@ -312,7 +321,8 @@ def bezier(points, index):
         current[1],
     )
 
-def svgPath(points):
+
+def svgPath(config, points):
     """
     // Render the svg <path> element
     // I:  - points (array): points coordinates
@@ -325,8 +335,9 @@ def svgPath(points):
     """
     # build the d attributes by looping over the points
     return '<path d="' + (
-        "".join([bezier(points, i) for i in range(len(points))])
+        "".join([bezier(config, points, i) for i in range(len(points))])
     )
+
 
 def render_curve(start, struct, end_svg, config):
     """
@@ -341,7 +352,7 @@ def render_curve(start, struct, end_svg, config):
         # anchor! come in pairs
         if (
             (template == "curve")
-            and (dict["drawn"] == False)
+            and (not dict["drawn"])
             and points[-1] == (dict["x2"], dict["y2"])
         ):
             points.append((dict["x1"], dict["y1"]))
@@ -361,6 +372,5 @@ def render_curve(start, struct, end_svg, config):
         )
     else:  # construct curve, at least 4 points
         points = list(reversed(points))
-        svg_html = svgPath(points) + end_html
+        svg_html = svgPath(config, points) + end_html
     return svg_html
-
