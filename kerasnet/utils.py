@@ -118,7 +118,6 @@ def topological_sort(layers):
 
         if node.outbound_layer not in layer_list:
             layer_list.append(node.outbound_layer)
-
     return layer_list
 
 
@@ -132,11 +131,10 @@ def topological_sort_nodes(layers):
     for node in nodes:
         node.visited = False
     stack = []
-    for node in nodes:
+    for node in reversed(nodes):
         if not node.visited:
             visit_node(node, stack)
-    stack.reverse()
-    return stack
+    return reversed(stack)
 
 
 def visit_node(node, stack):

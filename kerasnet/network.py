@@ -100,6 +100,7 @@ class Network:
                     outputs=self[layer.name].output, # tensor
                 )
             else:
+                self._intermediary_inputs[layer.name] = {layer.name: layer.input}
                 self._intermediary_models[layer.name] = Model(
                     inputs=[layer.input],
                     outputs=[layer.output],
@@ -125,8 +126,27 @@ class Network:
         return self._layers_map.get(layer_name, None)
 
     def summary(self):
+        def spaces(text, size):
+            return ("%-" + str(size) + "s") % str(text)
+
+        print("Model: \"%s\"" % self._model.name)
+        print("-" * 98)
+        print(
+            spaces("Layer (type)", 31),
+            spaces("Output Shape", 20),
+            spaces("Param #", 11),
+            spaces("Incoming layers", 33),
+        )
+        print("=" * 98)
         for layer in self._layers:
-            print("%s: %s" % (layer.name, self._get_output_shape(layer.name)))
+            params = sum([reduce(operator.mul, x.shape, 1) for x in layer.trainable_weights])
+            print(
+                spaces("%s (%s)" % (layer.name, self._get_layer_class(layer.name)), 31),
+                spaces(self._get_raw_output_shape(layer.name), 20),
+                spaces(params, 11),
+                spaces(("\n" + spaces("", 65)).join([layer.name for layer in self.incoming_layers(layer.name)]), 33)
+            )
+            print("-" * 98)
 
     def make_dummy_vector(self, layer_name, default_value=0.0):
         """
@@ -242,6 +262,10 @@ class Network:
             return layer.output_shape[0][1:]
         else:
             return layer.output_shape[1:]
+
+    def _get_raw_output_shape(self, layer_name):
+        layer = self[layer_name]
+        return layer.output_shape
 
     def _get_feature(self, layer_name):
         """
@@ -379,6 +403,27 @@ class Network:
                         weights[w].shape,
                     )
         return retval
+
+    def predict_to(self, inputs, layer_name):
+        """
+        Propagate input patterns to a bank in the network.
+        """
+        model = self._intermediary_models[layer_name]
+        try:
+            return model.predict(inputs)
+        except Exception as exc:
+            input_tensors = self._intermediary_inputs[layer_name]
+            input_layers_in_order = self._get_input_layers_in_order(list(input_tensors.keys()))
+            input_layers_shapes = [self._get_raw_output_shape(layer_name) for layer_name in input_layers_in_order]
+            hints = ", ".join([("%s: %s" % (name, shape)) for name, shape in zip(input_layers_in_order, input_layers_shapes)])
+            raise Exception("You must supply the inputs for these banks in order and in the right shape: %s" % hints) from exc
+
+    def _get_input_layers_in_order(self, layer_names):
+        """
+        Get the input layers in order
+        """
+        return [layer_name for layer_name in self.input_bank_order
+                if layer_name in layer_names]
 
     def picture(
         self,
@@ -1148,6 +1193,12 @@ class Network:
             return "output"
         else:
             return "input"
+
+    def _get_layer_class(self, layer_name):
+        """
+        """
+        layer = self[layer_name]
+        return layer.__class__.__name__
 
     def _get_level_ordering(self):
         """
