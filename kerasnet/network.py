@@ -50,7 +50,7 @@ class Network:
         self.minmax = (0, 0)
         self.max_draw_units = 20
         self.config = {
-            "name": "Keras Network",  # for svg title
+            "name": self._model.name,  # for svg title
             "class_id": "keras-network",  # for svg network classid
             "svg_id": "keras-network",  # for svg id
             "font_size": 12,  # for svg
