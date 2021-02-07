@@ -37,4 +37,5 @@ def test_graph():
 
     network = Network(model)
 
-    network.picture()
+    network.picture(format="pil")
+    network.picture(format="svg")

@@ -14,8 +14,9 @@ import math
 import operator
 from functools import reduce
 
-import numpy as np
 import tensorflow.keras.backend as K
+from tensorflow.keras.models import Model
+import numpy as np
 from matplotlib import cm
 from PIL import Image, ImageDraw
 
@@ -37,16 +38,21 @@ class Network:
 
     def __init__(self, model):
         self._model = model
+        # Place to put models between layers:
+        self._intermediary_models = {}
+        self._intermediary_inputs = {}
         # Get all of the layers, even implicit ones, in order:
         self._layers = topological_sort(self._model.layers)
         # Make a mapping of names to layers:
         self._layers_map = {layer.name: layer for layer in self._layers}
         # Get the input bank names, in order:
         self.input_bank_order = self._get_input_layers()
-        self.num_input_layers = len(self.input_bank_order)
+        # Get the output bank names, in order:
+        self.output_bank_order = self._get_output_layers()
         # Get the best (shortest path) between layers:
         self._level_ordering = self._get_level_ordering()
-        self._svg_counter = 0
+        # Build intermediary models:
+        self._build_intermediary_models()
         self.minmax = (0, 0)
         self.max_draw_units = 20
         self.config = {
@@ -82,11 +88,45 @@ class Network:
             "layers": {},
         }
 
+    def _build_intermediary_models(self):
+        # for all layers, inputs to here:
+        for layer in self._layers:
+            if self._get_layer_type(layer.name) != "input":
+                input_map = self._get_input_tensors(layer.name, {})
+                inputs = list(input_map.values())
+                self._intermediary_inputs[layer.name] = input_map
+                self._intermediary_models[layer.name] = Model(
+                    inputs=inputs, # tensors
+                    outputs=self[layer.name].output, # tensor
+                )
+            else:
+                self._intermediary_models[layer.name] = Model(
+                    inputs=[layer.input],
+                    outputs=[layer.output],
+                )
+
+    def _get_input_tensors(self, layer_name, input_map):
+        """
+        Given a layer_name, return {input_layer_name: tensor}
+        """
+        # Recursive; results in input_map
+        for layer in self.incoming_layers(layer_name):
+            if self._get_layer_type(layer.name) == "input":
+                if layer.name not in input_map:
+                    input_map[layer.name] = layer.input
+            else:
+                self._get_input_tensors(layer.name, input_map)
+        return input_map
+
     def __getattr__(self, attr):
         return getattr(self._model, attr)
 
     def __getitem__(self, layer_name):
         return self._layers_map.get(layer_name, None)
+
+    def summary(self):
+        for layer in self._layers:
+            print("%s: %s" % (layer.name, self._get_output_shape(layer.name)))
 
     def make_dummy_vector(self, layer_name, default_value=0.0):
         """
@@ -192,6 +232,9 @@ class Network:
 
     def _get_input_layers(self):
         return [x.name for x in self._layers if self._get_layer_type(x.name) == "input"]
+
+    def _get_output_layers(self):
+        return [x.name for x in self._layers if self._get_layer_type(x.name) == "output"]
 
     def _get_output_shape(self, layer_name):
         layer = self[layer_name]
@@ -368,17 +411,17 @@ class Network:
             <IPython.core.display.HTML object>
         """
         svg = self.to_svg(
-            inputs=inputs, class_id=self.config["class_id"], targets=targets
+            inputs=inputs, targets=targets
         )
         if format == "svg":
             return svg
         elif format == "pil":
             return svg_to_image(svg)
 
-    def to_svg(self, inputs=None, class_id=None, targets=None):
+    def to_svg(self, inputs=None, targets=None):
         """
         """
-        struct = self.build_struct(inputs, class_id, targets)
+        struct = self.build_struct(inputs, targets)
         templates = get_templates(self.config)
         # get the header:
         svg = None
@@ -388,6 +431,8 @@ class Network:
         # build the rest:
         for index in range(len(struct)):
             (template_name, dict) = struct[index]
+            # From config:
+            dict["class_id"] = self.config["class_id"]
             if template_name != "svg_head" and not template_name.startswith("_"):
                 rotate = dict.get("rotate", self.config["svg_rotate"])
                 if template_name == "label_svg" and rotate:
@@ -414,7 +459,7 @@ class Network:
         svg += """</svg></g></svg>"""
         return svg
 
-    def build_struct(self, inputs, class_id, targets):
+    def build_struct(self, inputs, targets):
         ordering = list(
             reversed(self._level_ordering)
         )  # list of names per level, input to output
@@ -444,7 +489,6 @@ class Network:
                         "image_svg",
                         {
                             "name": layer_name + "_targets",
-                            "svg_counter": self._svg_counter,
                             "x": cwidth,
                             "y": cheight,
                             "image": image_to_uri(image),
@@ -494,7 +538,6 @@ class Network:
                         "image_svg",
                         {
                             "name": layer_name + "_errors",
-                            "svg_counter": self._svg_counter,
                             "x": cwidth,
                             "y": cheight,
                             "image": image_to_uri(image),
@@ -731,7 +774,6 @@ class Network:
                     positioning[layer_name] = {
                         "name": layer_name
                         + ("-rotated" if self.config["svg_rotate"] else ""),
-                        "svg_counter": self._svg_counter,
                         "x": cwidth,
                         "y": cheight,
                         "image": image_to_uri(image),
@@ -948,7 +990,6 @@ class Network:
                     )
                 cwidth += width / 2
                 row_height = max(row_height, height)
-                self._svg_counter += 1
             cheight += row_height
             level_num += 1
         cheight += self.config["border_bottom"]
@@ -1338,7 +1379,7 @@ class Network:
                 #    v = self.dataset.inputs[0]
                 # else:
                 if True:  # FIXME
-                    if self.num_input_layers > 1:
+                    if len(self.input_bank_order) > 1:
                         v = []
                         for in_name in self.input_bank_order:
                             v.append(self.make_dummy_vector(in_name))

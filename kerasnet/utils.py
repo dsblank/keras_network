@@ -111,7 +111,7 @@ def topological_sort(layers):
         if hasattr(node.inbound_layers, "__iter__"):
             for layer in node.inbound_layers:
                 if layer not in layer_list:
-                    layer_list.append(layers)
+                    layer_list.append(layer)
         else:
             if node.inbound_layers not in layer_list:
                 layer_list.append(node.inbound_layers)
@@ -215,7 +215,7 @@ def svg_to_image(svg, background=(255, 255, 255, 255)):
 
 def get_templates(config):
     # Define the SVG strings:
-    image_svg = """<rect x="{{rx}}" y="{{ry}}" width="{{rw}}" height="{{rh}}" style="fill:none;stroke:{{border_color}};stroke-width:{{border_width}}"/><image id="{svg_id}_{{name}}_{{svg_counter}}" class="{svg_id}_{{name}}" x="{{x}}" y="{{y}}" height="{{height}}" width="{{width}}" preserveAspectRatio="none" image-rendering="optimizeSpeed" xlink:href="{{image}}"><title>{{tooltip}}</title></image>""".format(
+    image_svg = """<rect x="{{rx}}" y="{{ry}}" width="{{rw}}" height="{{rh}}" style="fill:none;stroke:{{border_color}};stroke-width:{{border_width}}"/><image id="{svg_id}_{{name}}" class="{{class_id}}" x="{{x}}" y="{{y}}" height="{{height}}" width="{{width}}" preserveAspectRatio="none" image-rendering="optimizeSpeed" xlink:href="{{image}}"><title>{{tooltip}}</title></image>""".format(
         **config
     )
     line_svg = """<line x1="{{x1}}" y1="{{y1}}" x2="{{x2}}" y2="{{y2}}" stroke="{{arrow_color}}" stroke-width="{arrow_width}"><title>{{tooltip}}</title></line>""".format(
