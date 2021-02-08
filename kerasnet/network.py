@@ -86,6 +86,8 @@ class Network:
             "dashboard.features.columns": 3,
             "dashboard.features.scale": 1.0,
             "layers": {},
+            # layer_name: {vshape, feature, keep_aspect_ratio, visible
+            # colormap, minmax, border_color, border_width}
         }
 
     def _build_intermediary_models(self):
@@ -171,8 +173,9 @@ class Network:
         # FIXME:
         # self is a layer from here down:
 
-        # if self.vshape and self.vshape != self.shape:
-        #    vector = vector.reshape(self.vshape)
+        vshape = self.vshape(layer_name)
+        if vshape and vshape != self._get_output_shape():
+           vector = vector.reshape(vshape)
         if len(vector.shape) > 2:
             # Drop dimensions of vector:
             s = slice(None, None)
@@ -256,6 +259,15 @@ class Network:
     def _get_output_layers(self):
         return [x.name for x in self._layers if self._get_layer_type(x.name) == "output"]
 
+    def vshape(self, layer_name):
+        """
+        Find the vshape of layer.
+        """
+        if layer_name in self.config["layers"] and "vshape" in self.config["layers"][layer_name]:
+            return self.config["layers"][layer_name]["vshape"]
+        else:
+            return None
+
     def _get_output_shape(self, layer_name):
         layer = self[layer_name]
         if isinstance(layer.output_shape, list):
@@ -271,10 +283,16 @@ class Network:
         """
         Which feature plane is selected to show? Defaults to 0
         """
-        return 0
+        if layer_name in self.config["layers"] and "feature" in self.config["layers"][layer_name]:
+            return self.config["layers"][layer_name]["feature"]
+        else:
+            return 0
 
     def _get_keep_aspect_ratio(self, layer_name):
-        return False
+        if layer_name in self.config["layers"] and "keep_aspect_ratio" in self.config["layers"][layer_name]:
+            return self.config["layers"][layer_name]["keep_aspect_ratio"]
+        else:
+            return False
 
     def _get_tooltip(self, layer_name):
         """
@@ -318,16 +336,19 @@ class Network:
         return retval
 
     def _get_visible(self, layer_name):
-        return True
+        if layer_name in self.config["layers"] and "visible" in self.config["layers"][layer_name]:
+            return self.config["layers"][layer_name]["visble"]
+        else:
+            return True
 
     def _get_colormap(self, layer_name):
-        return cm.get_cmap("RdGy")
+        if layer_name in self.config["layers"] and "colormap" in self.config["layers"][layer_name]:
+            return self.config["layers"][layer_name]["colormap"]
+        else:
+            return "RdGy"
 
     def _get_activation_name(self, layer):
         if hasattr(layer, "activation"):
-            # names = layer.activation._keras_api_names
-            # if len(names) > 0 and "." in names[0]:
-            #    names[0].split(".")[-1]
             return layer.activation.__name__
 
     def _get_act_minmax(self, layer_name):
@@ -336,10 +357,9 @@ class Network:
 
         Note: +/- 2 represents infinity
         """
-        # if self.minmax is not None: # allow override
-        #    return self.minmax
-        # else:
-        if True:
+        if layer_name in self.config["layers"] and "minmax" in self.config["layers"][layer_name]:
+            return self.config["layers"][layer_name]["minmax"]
+        else:
             layer = self[layer_name]
             if layer.__class__.__name__ == "Flatten":
                 in_layer = self.incoming_layers(layer_name)[0]
@@ -368,18 +388,14 @@ class Network:
                     return (-2, +2)
 
     def _get_border_color(self, layer_name):
-        if self.config.get("highlights") and layer_name in self.config.get(
-            "highlights"
-        ):
-            return self.config["highlights"][layer_name]["border_color"]
+        if layer_name in self.config["layers"] and "border_color" in self.config["layers"][layer_name]:
+            return self.config["layers"][layer_name]["border_color"]
         else:
             return self.config["border_color"]
 
     def _get_border_width(self, layer_name):
-        if self.config.get("highlights") and layer_name in self.config.get(
-            "highlights"
-        ):
-            return self.config["highlights"][layer_name]["border_width"]
+        if layer_name in self.config["layers"] and "border_width" in self.config["layers"][layer_name]:
+            return self.config["layers"][layer_name]["border_width"]
         else:
             return self.config["border_width"]
 
@@ -1360,16 +1376,6 @@ class Network:
                         best = (sum, level)
                 ordering[level_num] = best[1]
             return ordering
-
-    def vshape(self, layer_name):
-        """
-        Find the vshape of layer.
-        """
-        # layer = self[layer_name]
-        # vshape = layer.vshape if layer.vshape else layer.shape if layer.shape else None
-        # if vshape is None:
-        vshape = self._get_output_shape(layer_name)
-        return vshape
 
     def _pre_process_struct(self, inputs, ordering, targets):
         """
