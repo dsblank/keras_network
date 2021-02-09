@@ -91,42 +91,52 @@ class Network:
             # colormap, minmax, border_color, border_width}
         }
         # Set the minmax for each layer:
-        self.reset_minmax()
-
-    def _build_intermediary_models(self):
-        # for all layers, inputs to here:
-        for layer in self._layers:
-            if self._get_layer_type(layer.name) != "input":
-                input_map = self._get_input_tensors(layer.name, {})
-                inputs = list(input_map.values())
-                self._intermediary_inputs[layer.name] = input_map
-                self._intermediary_models[layer.name] = Model(
-                    inputs=inputs, outputs=self[layer.name].output,  # tensors  # tensor
-                )
-            else:
-                self._intermediary_inputs[layer.name] = {layer.name: layer.input}
-                self._intermediary_models[layer.name] = Model(
-                    inputs=[layer.input], outputs=[layer.output],
-                )
-
-    def _get_input_tensors(self, layer_name, input_map):
-        """
-        Given a layer_name, return {input_layer_name: tensor}
-        """
-        # Recursive; results in input_map
-        for layer in self.incoming_layers(layer_name):
-            if self._get_layer_type(layer.name) == "input":
-                if layer.name not in input_map:
-                    input_map[layer.name] = layer.input
-            else:
-                self._get_input_tensors(layer.name, input_map)
-        return input_map
+        self.initialize()
 
     def __getattr__(self, attr):
         return getattr(self._model, attr)
 
     def __getitem__(self, layer_name):
         return self._layers_map.get(layer_name, None)
+
+    def initialize(self, inputs=None, reset=True):
+        """
+        Set minmax for each layer based on inputs or
+        activation functions per layer.
+        """
+        if inputs is None:
+            # We don't have direct values, so we base minmax
+            # on activation output ranges
+            for layer in self._layers:
+                if layer.name not in self.config["layers"]:
+                    self.config["layers"][layer.name] = {}
+                # FIXME: make recurive, in case of linear/no activation:
+                self.config["layers"][layer.name]["minmax"] = self._get_act_minmax(
+                    layer.name
+                )
+        else:
+            # If reset is true, we set to extremes so any value will adjust
+            if reset:
+                for layer in self._layers:
+                    if layer.name not in self.config["layers"]:
+                        self.config["layers"][layer.name] = {}
+                    self.config["layers"][layer.name]["minmax"] = (
+                        float("+inf"),
+                        float("-inf"),
+                    )
+
+            # Now we set the minmax for each layer, based on past values
+            # or extremes:
+            for layer in self._layers:
+                outputs = self.predict_to(inputs, layer.name)
+                min_orig, max_orig = self.config["layers"][layer.name]["minmax"]
+                min_new, max_new = (
+                    min(outputs.min(), min_orig),
+                    max(outputs.max(), max_orig),
+                )
+                # FIXME: make sure in range of act_minmax?
+                # FIXME: don't let them be equal; increase by ... 50% or 1 or something?
+                self.config["layers"][layer.name]["minmax"] = (min_new, max_new)
 
     def summary(self):
         def spaces(text, size):
@@ -157,6 +167,126 @@ class Network:
                 ),
             )
             print("-" * 98)
+
+    def predict_to_image(self, inputs, layer_name):
+        """
+        Propagate input patterns to a bank in the network and
+        turn it into an image.
+        """
+        outputs = self.predict_to(inputs, layer_name)
+        return self.make_image(layer_name, outputs)
+
+    def predict_to(self, inputs, layer_name):
+        """
+        Propagate input patterns to a bank in the network.
+        """
+        model = self._intermediary_models[layer_name]
+        try:
+            return model.predict(inputs)
+        except Exception as exc:
+            input_tensors = self._intermediary_inputs[layer_name]
+            input_layers_in_order = self._get_input_layers_in_order(
+                list(input_tensors.keys())
+            )
+            input_layers_shapes = [
+                self._get_raw_output_shape(layer_name)
+                for layer_name in input_layers_in_order
+            ]
+            hints = ", ".join(
+                [
+                    ("%s: %s" % (name, shape))
+                    for name, shape in zip(input_layers_in_order, input_layers_shapes)
+                ]
+            )
+            raise Exception(
+                "You must supply the inputs for these banks in order and in the right shape: %s"
+                % hints
+            ) from exc
+
+    def take_picture(
+        self,
+        inputs=None,
+        targets=None,
+        show_error=False,
+        show_targets=False,
+        format=None,
+    ):
+        """
+        Create an SVG of the network given some inputs (optional).
+
+        Arguments:
+            inputs: input values to propagate
+            targets: target values to show
+            show_error (bool): show the output error in resulting picture
+            show_targets (bool): show the targets in resulting picture
+            format (str): optional "html", "image", or "svg"
+
+        Examples:
+            >>> net = Network("Picture", 2, 2, 1)
+            >>> net.compile(error="mse", optimizer="adam")
+            >>> net.take_picture()
+            <IPython.core.display.HTML object>
+            >>> net.take_picture([.5, .5])
+            <IPython.core.display.HTML object>
+            >>> net.take_picture([.5, .5])
+            <IPython.core.display.HTML object>
+        """
+        try:
+            from IPython.display import HTML
+        except ImportError:
+            HTML = None
+
+        svg = self.to_svg(inputs=inputs, targets=targets)
+
+        if format is None:
+            try:
+                get_ipython()  # noqa: F821
+                format = "html"
+            except Exception:
+                format = "image"
+
+        if format == "html":
+            if HTML is not None:
+                return HTML(svg)
+            else:
+                raise Exception(
+                    "need to install `IPython` or use Network.take_picture(format='image')"
+                )
+        elif format == "svg":
+            return svg
+        elif format == "image":
+            return svg_to_image(svg)
+        else:
+            raise ValueError("unable to convert to format %r" % format)
+
+    def _build_intermediary_models(self):
+        # for all layers, inputs to here:
+        for layer in self._layers:
+            if self._get_layer_type(layer.name) != "input":
+                input_map = self._get_input_tensors(layer.name, {})
+                inputs = list(input_map.values())
+                self._intermediary_inputs[layer.name] = input_map
+                self._intermediary_models[layer.name] = Model(
+                    inputs=inputs, outputs=self[layer.name].output,  # tensors  # tensor
+                )
+            else:
+                self._intermediary_inputs[layer.name] = {layer.name: layer.input}
+                self._intermediary_models[layer.name] = Model(
+                    inputs=[layer.input], outputs=[layer.output],
+                )
+
+    def _get_input_tensors(self, layer_name, input_map):
+        """
+        Given a layer_name, return {input_layer_name: tensor}
+        """
+        # Recursive; results in input_map
+        for layer in self.incoming_layers(layer_name):
+            if self._get_layer_type(layer.name) == "input":
+                if layer.name not in input_map:
+                    input_map[layer.name] = layer.input
+            else:
+                self._get_input_tensors(layer.name, input_map)
+        return input_map
 
     def make_dummy_vector(self, layer_name, default_value=0.0):
         """
@@ -454,69 +584,6 @@ class Network:
                     )
         return retval
 
-    def reset_minmax(self):
-        """
-        Reset the minmax for each layer.
-        """
-        for layer in self._layers:
-            if layer.name not in self.config["layers"]:
-                self.config["layers"][layer.name] = {}
-            self.config["layers"][layer.name]["minmax"] = self._get_act_minmax(layer.name)
-
-    def set_minmax(self, inputs, reset=True):
-        """
-        Set minmax for each layer based on inputs.
-        """
-        if reset:
-            for layer in self._layers:
-                if layer.name not in self.config["layers"]:
-                    self.config["layers"][layer.name] = {}
-                self.config["layers"][layer.name]["minmax"] = (float("+inf"), float("-inf"))
-
-        for layer in self._layers:
-            outputs = self.predict_to(inputs, layer.name)
-            min_orig, max_orig = self.config["layers"][layer.name]["minmax"]
-            self.config["layers"][layer.name]["minmax"] = (
-                min(outputs.min(), min_orig),
-                max(outputs.max(), max_orig),
-            )
-
-    def predict_to_image(self, inputs, layer_name):
-        """
-        Propagate input patterns to a bank in the network and
-        turn it into an image.
-        """
-        model = self._intermediary_models[layer_name]
-        outputs = self.predict_to(inputs, layer_name)
-        return self.make_image(layer_name, outputs)
-
-    def predict_to(self, inputs, layer_name):
-        """
-        Propagate input patterns to a bank in the network.
-        """
-        model = self._intermediary_models[layer_name]
-        try:
-            return model.predict(inputs)
-        except Exception as exc:
-            input_tensors = self._intermediary_inputs[layer_name]
-            input_layers_in_order = self._get_input_layers_in_order(
-                list(input_tensors.keys())
-            )
-            input_layers_shapes = [
-                self._get_raw_output_shape(layer_name)
-                for layer_name in input_layers_in_order
-            ]
-            hints = ", ".join(
-                [
-                    ("%s: %s" % (name, shape))
-                    for name, shape in zip(input_layers_in_order, input_layers_shapes)
-                ]
-            )
-            raise Exception(
-                "You must supply the inputs for these banks in order and in the right shape: %s"
-                % hints
-            ) from exc
-
     def _get_input_layers_in_order(self, layer_names):
         """
         Get the input layers in order
@@ -526,62 +593,6 @@ class Network:
             for layer_name in self.input_bank_order
             if layer_name in layer_names
         ]
-
-    def take_picture(
-        self,
-        inputs=None,
-        targets=None,
-        show_error=False,
-        show_targets=False,
-        format=None,
-    ):
-        """
-        Create an SVG of the network given some inputs (optional).
-
-        Arguments:
-            inputs: input values to propagate
-            targets: target values to show
-            show_error (bool): show the output error in resulting picture
-            show_targets (bool): show the targets in resulting picture
-            format (str): optional "html", "image", or "svg"
-
-        Examples:
-            >>> net = Network("Picture", 2, 2, 1)
-            >>> net.compile(error="mse", optimizer="adam")
-            >>> net.take_picture()
-            <IPython.core.display.HTML object>
-            >>> net.take_picture([.5, .5])
-            <IPython.core.display.HTML object>
-            >>> net.take_picture([.5, .5])
-            <IPython.core.display.HTML object>
-        """
-        try:
-            from IPython.display import HTML
-        except ImportError:
-            HTML = None
-
-        svg = self.to_svg(inputs=inputs, targets=targets)
-
-        if format is None:
-            try:
-                get_ipython()  # noqa: F821
-                format = "html"
-            except Exception:
-                format = "image"
-
-        if format == "html":
-            if HTML is not None:
-                return HTML(svg)
-            else:
-                raise Exception(
-                    "need to install `IPython` or use Network.take_picture(format='image')"
-                )
-        elif format == "svg":
-            return svg
-        elif format == "image":
-            return svg_to_image(svg)
-        else:
-            raise ValueError("unable to convert to format %r" % format)
 
     def to_svg(self, inputs=None, targets=None):
         """
