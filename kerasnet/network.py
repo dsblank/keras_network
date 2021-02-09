@@ -36,7 +36,7 @@ class Network:
     Wrapper around a keras.Model.
     """
 
-    def __init__(self, model):
+    def __init__(self, model, **config):
         self._model = model
         # Place to put models between layers:
         self._intermediary_models = {}
@@ -52,13 +52,14 @@ class Network:
         # Get the best (shortest path) between layers:
         self._level_ordering = self._get_level_ordering()
         # Build intermediary models:
-        self._build_intermediary_models()
+        # FIXME: build as needed
+        #self._build_intermediary_models()
         # For saving HTML for watchers
         self._svg = None
         self.config = {
             "name": self._model.name,  # for svg title
             "class_id": "keras-network",  # for svg network classid
-            "svg_id": "keras-network",  # for svg id
+            "id": "keras-network",  # for svg id
             "font_size": 12,  # for svg
             "font_family": "monospace",  # for svg
             "border_top": 25,  # for svg
@@ -77,11 +78,11 @@ class Network:
             "show_error": False,
             "pixels_per_unit": 1,
             "precision": 2,
-            "svg_scale": None,  # for svg, 0 - 1, or None for optimal
-            "svg_rotate": False,  # for rotating SVG
-            "svg_smoothing": 0.02,  # smoothing curves
-            "svg_preferred_size": 400,  # in pixels
-            "svg_max_width": 800,  # in pixels
+            "scale": None,  # for svg, 0 - 1, or None for optimal
+            "rotate": False,  # for rotating SVG
+            "smoothing": 0.02,  # smoothing curves
+            "preferred_size": 400,  # in pixels
+            "max_width": 800,  # in pixels
             "dashboard.dataset": "Train",
             "dashboard.features.bank": "",
             "dashboard.features.columns": 3,
@@ -90,6 +91,7 @@ class Network:
             # layer_name: {vshape, feature, keep_aspect_ratio, visible
             # colormap, minmax, border_color, border_width}
         }
+        self.config.update(config)
         # Set the minmax for each layer:
         self.initialize()
 
@@ -103,6 +105,16 @@ class Network:
         """
         Set minmax for each layer based on inputs or
         activation functions per layer.
+
+        If inputs is None, just make best guess for all layers.
+
+        If inputs is not None, use these for input layer
+        minmax, and all other layers get best guess.
+
+        If reset is True, don't use previous minmax
+        for input layers, but sample from inputs again.
+        If reset is False, consider previous input
+        layer minmaxes with new input values.
         """
         if inputs is None:
             # We don't have direct values, so we base minmax
@@ -110,33 +122,36 @@ class Network:
             for layer in self._layers:
                 if layer.name not in self.config["layers"]:
                     self.config["layers"][layer.name] = {}
-                # FIXME: make recurive, in case of linear/no activation:
                 self.config["layers"][layer.name]["minmax"] = self._get_act_minmax(
                     layer.name
                 )
         else:
             # If reset is true, we set to extremes so any value will adjust
+            # Only do this on input layers:
             if reset:
                 for layer in self._layers:
-                    if layer.name not in self.config["layers"]:
-                        self.config["layers"][layer.name] = {}
-                    self.config["layers"][layer.name]["minmax"] = (
-                        float("+inf"),
-                        float("-inf"),
-                    )
-
-            # Now we set the minmax for each layer, based on past values
+                    if self._get_layer_type(layer.name) == "input":
+                        if layer.name not in self.config["layers"]:
+                            self.config["layers"][layer.name] = {}
+                        self.config["layers"][layer.name]["minmax"] = (
+                            float("+inf"),
+                            float("-inf"),
+                        )
+            # Now we set the minmax for input layer, based on past values
             # or extremes:
             for layer in self._layers:
-                outputs = self.predict_to(inputs, layer.name)
-                min_orig, max_orig = self.config["layers"][layer.name]["minmax"]
-                min_new, max_new = (
-                    min(outputs.min(), min_orig),
-                    max(outputs.max(), max_orig),
-                )
-                # FIXME: make sure in range of act_minmax?
-                # FIXME: don't let them be equal; increase by ... 50% or 1 or something?
-                self.config["layers"][layer.name]["minmax"] = (min_new, max_new)
+                if self._get_layer_type(layer.name) == "input":
+                    outputs = self.predict_to(inputs, layer.name)
+                    min_orig, max_orig = self.config["layers"][layer.name]["minmax"]
+                    min_new, max_new = (
+                        min(outputs.min(), min_orig),
+                        max(outputs.max(), max_orig),
+                    )
+                    if min_new != max_new:
+                        self.config["layers"][layer.name]["minmax"] = (min_new, max_new)
+                    else:
+                        # Don't let them be equal:
+                        self.config["layers"][layer.name]["minmax"] = (min_new - 1, max_new + 1)
 
     def summary(self):
         def spaces(text, size):
@@ -383,7 +398,7 @@ class Network:
             image = Image.fromarray(vector)
             image = image.resize((new_height, new_width))
         # If rotated, and has features, rotate it:
-        if self.config.get("svg_rotate", False):
+        if self.config.get("rotate", False):
             output_shape = self._get_output_shape(layer_name)
             if (isinstance(output_shape, tuple) and len(output_shape) >= 3) or (
                 self.vshape is not None and len(self.vshape) == 2
@@ -457,31 +472,16 @@ class Network:
             return "(%s, %s)" % (minv, maxv)
 
         layer = self[layer_name]
-        kind = self._get_layer_type(layer_name)
         activation = self._get_activation_name(layer)
-        retval = "Layer: %r" % html.escape(self[layer_name].name)
-        retval += "\nType: %s" % kind
+        retval = "Layer: %s %r" % (
+            html.escape(self[layer_name].name),
+            layer.__class__.__name__)
         if activation:
-            retval += "\nActivation: %s" % activation
+            retval += "\nActivation function: %s" % activation
         retval += "\nOutput range: %s" % (
             format_range(self._get_act_minmax(layer_name),)
         )
-        # if self.shape:
-        #    retval += "\n shape = %s" % (self.shape, )
-        # if self.dropout:
-        #    retval += "\n dropout = %s" % self.dropout
-        #    if self.dropout_dim > 0:
-        #        retval += "\n dropout dimension = %s" % self.dropout_dim
-        # if self.bidirectional:
-        #    retval += "\n bidirectional = %s" % self.bidirectional
-        # if kind == "input":
-        #    retval += "\nClass = Input"
-        # else:
-        retval += "\nClass = %s" % layer.__class__.__name__
-        # for key in self.params:
-        #    if key in ["name"] or self.params[key] is None:
-        #        continue
-        #    retval += "\n %s = %s" % (key, html.escape(str(self.params[key])))
+        retval += "\nShape = %s" % (self._get_raw_output_shape(layer_name),)
         return retval
 
     def _get_visible(self, layer_name):
@@ -489,7 +489,7 @@ class Network:
             layer_name in self.config["layers"]
             and "visible" in self.config["layers"][layer_name]
         ):
-            return self.config["layers"][layer_name]["visble"]
+            return self.config["layers"][layer_name]["visible"]
         else:
             return True
 
@@ -518,16 +518,12 @@ class Network:
         ):
             return self.config["layers"][layer_name]["minmax"]
         else:
+            # FIXME: uses -2,2 for unbounded, unknown range values
             layer = self[layer_name]
             if layer.__class__.__name__ == "Flatten":
                 in_layer = self.incoming_layers(layer_name)[0]
                 return self._get_act_minmax(in_layer.name)
             elif self._get_layer_type(layer_name) == "input":
-                # try to get from dataset
-                # if self.network and len(self.network.dataset) > 0:
-                #    bank_idx = self.network.input_bank_order.index(self.name)
-                #    return self.network.dataset._inputs_range[bank_idx]
-                # else:
                 return (-2, +2)
             else:  # try to get from activation function
                 activation = self._get_activation_name(layer)
@@ -540,9 +536,6 @@ class Network:
                 elif activation in ["selu", "linear"]:
                     return (-2, +2)
                 else:  # default, or unknown activation function
-                    # Enhancement:
-                    # Someday could sample the unknown activation function
-                    # and provide reasonable values
                     return (-2, +2)
 
     def _get_border_color(self, layer_name):
@@ -602,15 +595,15 @@ class Network:
         # get the header:
         svg = None
         for (template_name, dict) in struct:
-            if template_name == "svg_head":
-                svg = templates["svg_head"].format(**dict)
+            if template_name == "head_svg":
+                svg = templates["head_svg"].format(**dict)
         # build the rest:
         for index in range(len(struct)):
             (template_name, dict) = struct[index]
             # From config:
             dict["class_id"] = self.config["class_id"]
-            if template_name != "svg_head" and not template_name.startswith("_"):
-                rotate = dict.get("rotate", self.config["svg_rotate"])
+            if template_name != "head_svg" and not template_name.startswith("_"):
+                rotate = dict.get("rotate", self.config["rotate"])
                 if template_name == "label_svg" and rotate:
                     dict["x"] += 8
                     dict["text_anchor"] = "middle"
@@ -949,7 +942,7 @@ class Network:
                     cwidth += spacing - (width / 2)
                     positioning[layer_name] = {
                         "name": layer_name
-                        + ("-rotated" if self.config["svg_rotate"] else ""),
+                        + ("-rotated" if self.config["rotate"] else ""),
                         "x": cwidth,
                         "y": cheight,
                         "image": image_to_uri(image),
@@ -1056,7 +1049,7 @@ class Network:
                     features = str(output_shape[3])
                     # FIXME:
                     feature = str(self._get_feature(layer_name))
-                    if self.config["svg_rotate"]:
+                    if self.config["rotate"]:
                         struct.append(
                             [
                                 "label_svg",
@@ -1151,11 +1144,11 @@ class Network:
                                 - 1 * 2.0
                                 - 15
                                 + (
-                                    -3 if self.config["svg_rotate"] else 0
+                                    -3 if self.config["rotate"] else 0
                                 ),  # length of chars * 2.0
                                 "y": positioning[layer_name]["y"]
                                 + 5
-                                + (-1 if self.config["svg_rotate"] else 0),
+                                + (-1 if self.config["rotate"] else 0),
                                 "label": "x",  # "&#10683;"
                                 "font_size": self.config["font_size"] * 1.3,
                                 "font_color": "black",
@@ -1174,7 +1167,7 @@ class Network:
         if False:  # FIXME
             # dynamic image:
             label = "*"
-            if self.config["svg_rotate"]:
+            if self.config["rotate"]:
                 struct.append(
                     [
                         "label_svg",
@@ -1205,7 +1198,7 @@ class Network:
                     ]
                 )
         # Draw the title:
-        if self.config["svg_rotate"]:
+        if self.config["rotate"]:
             struct.append(
                 [
                     "label_svg",
@@ -1237,27 +1230,27 @@ class Network:
             )
         # figure out scale optimal, if scale is None
         # the fraction:
-        if self.config["svg_scale"] is not None:  # scale is given:
-            if self.config["svg_rotate"]:
-                scale_value = (self.config["svg_max_width"] / cheight) * self.config[
-                    "svg_scale"
+        if self.config["scale"] is not None:  # scale is given:
+            if self.config["rotate"]:
+                scale_value = (self.config["max_width"] / cheight) * self.config[
+                    "scale"
                 ]
             else:
-                scale_value = (self.config["svg_max_width"] / max_width) * self.config[
-                    "svg_scale"
+                scale_value = (self.config["max_width"] / max_width) * self.config[
+                    "scale"
                 ]
         else:
-            if self.config["svg_rotate"]:
-                scale_value = self.config["svg_max_width"] / max(cheight, max_width)
+            if self.config["rotate"]:
+                scale_value = self.config["max_width"] / max(cheight, max_width)
             else:
-                scale_value = self.config["svg_preferred_size"] / max(
+                scale_value = self.config["preferred_size"] / max(
                     cheight, max_width
                 )
         # svg_scale = "%s%%" % int(scale_value * 100)
         scaled_width = max_width * scale_value
         scaled_height = cheight * scale_value
         # Need a top-level width, height because Jupyter peeks at it
-        if self.config["svg_rotate"]:
+        if self.config["rotate"]:
             svg_transform = (
                 """ transform="rotate(90) translate(0 -%s)" """ % scaled_height
             )
@@ -1270,18 +1263,18 @@ class Network:
             top_height = scaled_height
         struct.append(
             [
-                "svg_head",
+                "head_svg",
                 {
                     "viewbox_width": int(max_width),  # view port width
                     "viewbox_height": int(cheight),  # view port height
                     "width": int(scaled_width),  # actual pixels of image in page
                     "height": int(scaled_height),  # actual pixels of image in page
-                    "svg_id": self.config["svg_id"],
+                    "id": self.config["id"],
                     "top_width": int(top_width),
                     "top_height": int(top_height),
                     "arrow_color": self.config["arrow_color"],
                     "arrow_width": self.config["arrow_width"],
-                    "svg_transform": svg_transform,
+                    "transform": svg_transform,
                 },
             ]
         )

@@ -213,7 +213,7 @@ def svg_to_image(svg, background=(255, 255, 255, 255)):
 
 def get_templates(config):
     # Define the SVG strings:
-    image_svg = """<rect x="{{rx}}" y="{{ry}}" width="{{rw}}" height="{{rh}}" style="fill:none;stroke:{{border_color}};stroke-width:{{border_width}}"/><image id="{svg_id}_{{name}}" class="{{class_id}}" x="{{x}}" y="{{y}}" height="{{height}}" width="{{width}}" preserveAspectRatio="none" image-rendering="optimizeSpeed" xlink:href="{{image}}"><title>{{tooltip}}</title></image>""".format(
+    image_svg = """<rect x="{{rx}}" y="{{ry}}" width="{{rw}}" height="{{rh}}" style="fill:none;stroke:{{border_color}};stroke-width:{{border_width}}"/><image id="{id}_{{name}}" class="{{class_id}}" x="{{x}}" y="{{y}}" height="{{height}}" width="{{width}}" preserveAspectRatio="none" image-rendering="optimizeSpeed" xlink:href="{{image}}"><title>{{tooltip}}</title></image>""".format(
         **config
     )
     line_svg = """<line x1="{{x1}}" y1="{{y1}}" x2="{{x2}}" y2="{{y2}}" stroke="{{arrow_color}}" stroke-width="{arrow_width}"><title>{{tooltip}}</title></line>""".format(
@@ -227,8 +227,8 @@ def get_templates(config):
     )
     arrow_rect = """<rect x="{rx}" y="{ry}" width="{rw}" height="{rh}" style="fill:white;stroke:none"><title>{tooltip}</title></rect>"""
     label_svg = """<text x="{x}" y="{y}" font-family="{font_family}" font-size="{font_size}" text-anchor="{text_anchor}" fill="{font_color}" alignment-baseline="central" {transform}>{label}</text>"""
-    svg_head = """<svg id='{svg_id}' xmlns='http://www.w3.org/2000/svg' xmlns:xlink='http://www.w3.org/1999/xlink' image-rendering="pixelated" width="{top_width}px" height="{top_height}px">
- <g {svg_transform}>
+    svg_head = """<svg id='{id}' xmlns='http://www.w3.org/2000/svg' xmlns:xlink='http://www.w3.org/1999/xlink' image-rendering="pixelated" width="{top_width}px" height="{top_height}px">
+ <g {transform}>
   <svg viewBox="0 0 {viewbox_width} {viewbox_height}" width="{width}px" height="{height}px">
     <defs>
         <marker id="arrow" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
@@ -241,7 +241,7 @@ def get_templates(config):
         "arrow_svg": arrow_svg,
         "arrow_rect": arrow_rect,
         "label_svg": label_svg,
-        "svg_head": svg_head,
+        "head_svg": svg_head,
         "curve": curve_svg,
     }
     return templates
@@ -281,7 +281,7 @@ def controlPoint(config, current, previous_point, next_point, reverse=False):
 
     # // If is end-control-point, add PI to the angle to go backward
     angle = o.angle + (math.pi if reverse else 0)
-    length = o.length * config["svg_smoothing"]
+    length = o.length * config["smoothing"]
 
     # // The control point position is relative to the current point
     x = current[0] + math.cos(angle) * length
