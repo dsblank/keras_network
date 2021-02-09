@@ -14,11 +14,11 @@ import math
 import operator
 from functools import reduce
 
-import tensorflow.keras.backend as K
-from tensorflow.keras.models import Model
 import numpy as np
+import tensorflow.keras.backend as K
 from matplotlib import cm
 from PIL import Image, ImageDraw
+from tensorflow.keras.models import Model
 
 from .utils import (
     get_error_colormap,
@@ -54,7 +54,8 @@ class Network:
         # Build intermediary models:
         self._build_intermediary_models()
         self.minmax = (0, 0)
-        self.max_draw_units = 20
+        # For saving HTML for watchers
+        self._svg = None
         self.config = {
             "name": self._model.name,  # for svg title
             "class_id": "keras-network",  # for svg network classid
@@ -67,6 +68,7 @@ class Network:
             "vspace": 30,  # for svg, arrows
             "image_maxdim": 200,  # for svg
             "image_pixels_per_unit": 50,  # for svg
+            "max_draw_units": 20,
             "activation": "linear",  # Dense default, if none specified
             "arrow_color": "black",
             "arrow_width": "2",
@@ -98,14 +100,12 @@ class Network:
                 inputs = list(input_map.values())
                 self._intermediary_inputs[layer.name] = input_map
                 self._intermediary_models[layer.name] = Model(
-                    inputs=inputs, # tensors
-                    outputs=self[layer.name].output, # tensor
+                    inputs=inputs, outputs=self[layer.name].output,  # tensors  # tensor
                 )
             else:
                 self._intermediary_inputs[layer.name] = {layer.name: layer.input}
                 self._intermediary_models[layer.name] = Model(
-                    inputs=[layer.input],
-                    outputs=[layer.output],
+                    inputs=[layer.input], outputs=[layer.output],
                 )
 
     def _get_input_tensors(self, layer_name, input_map):
@@ -131,7 +131,7 @@ class Network:
         def spaces(text, size):
             return ("%-" + str(size) + "s") % str(text)
 
-        print("Model: \"%s\"" % self._model.name)
+        print('Model: "%s"' % self._model.name)
         print("-" * 98)
         print(
             spaces("Layer (type)", 31),
@@ -141,12 +141,19 @@ class Network:
         )
         print("=" * 98)
         for layer in self._layers:
-            params = sum([reduce(operator.mul, x.shape, 1) for x in layer.trainable_weights])
+            params = sum(
+                [reduce(operator.mul, x.shape, 1) for x in layer.trainable_weights]
+            )
             print(
                 spaces("%s (%s)" % (layer.name, self._get_layer_class(layer.name)), 31),
                 spaces(self._get_raw_output_shape(layer.name), 20),
                 spaces(params, 11),
-                spaces(("\n" + spaces("", 65)).join([layer.name for layer in self.incoming_layers(layer.name)]), 33)
+                spaces(
+                    ("\n" + spaces("", 65)).join(
+                        [layer.name for layer in self.incoming_layers(layer.name)]
+                    ),
+                    33,
+                ),
             )
             print("-" * 98)
 
@@ -175,7 +182,7 @@ class Network:
 
         vshape = self.vshape(layer_name)
         if vshape and vshape != self._get_output_shape():
-           vector = vector.reshape(vshape)
+            vector = vector.reshape(vshape)
         if len(vector.shape) > 2:
             # Drop dimensions of vector:
             s = slice(None, None)
@@ -218,7 +225,7 @@ class Network:
                 cm_hot = cm.get_cmap("RdGy")
             vector = cm_hot(vector)
         vector = np.uint8(vector * 255)
-        if max(vector.shape) <= self.max_draw_units:
+        if max(vector.shape) <= self.config["max_draw_units"]:
             # Need to make it bigger, to draw circles:
             # Make this value too small, and borders are blocky;
             # too big and borders are too thin
@@ -257,13 +264,18 @@ class Network:
         return [x.name for x in self._layers if self._get_layer_type(x.name) == "input"]
 
     def _get_output_layers(self):
-        return [x.name for x in self._layers if self._get_layer_type(x.name) == "output"]
+        return [
+            x.name for x in self._layers if self._get_layer_type(x.name) == "output"
+        ]
 
     def vshape(self, layer_name):
         """
         Find the vshape of layer.
         """
-        if layer_name in self.config["layers"] and "vshape" in self.config["layers"][layer_name]:
+        if (
+            layer_name in self.config["layers"]
+            and "vshape" in self.config["layers"][layer_name]
+        ):
             return self.config["layers"][layer_name]["vshape"]
         else:
             return None
@@ -283,13 +295,19 @@ class Network:
         """
         Which feature plane is selected to show? Defaults to 0
         """
-        if layer_name in self.config["layers"] and "feature" in self.config["layers"][layer_name]:
+        if (
+            layer_name in self.config["layers"]
+            and "feature" in self.config["layers"][layer_name]
+        ):
             return self.config["layers"][layer_name]["feature"]
         else:
             return 0
 
     def _get_keep_aspect_ratio(self, layer_name):
-        if layer_name in self.config["layers"] and "keep_aspect_ratio" in self.config["layers"][layer_name]:
+        if (
+            layer_name in self.config["layers"]
+            and "keep_aspect_ratio" in self.config["layers"][layer_name]
+        ):
             return self.config["layers"][layer_name]["keep_aspect_ratio"]
         else:
             return False
@@ -336,13 +354,19 @@ class Network:
         return retval
 
     def _get_visible(self, layer_name):
-        if layer_name in self.config["layers"] and "visible" in self.config["layers"][layer_name]:
+        if (
+            layer_name in self.config["layers"]
+            and "visible" in self.config["layers"][layer_name]
+        ):
             return self.config["layers"][layer_name]["visble"]
         else:
             return True
 
     def _get_colormap(self, layer_name):
-        if layer_name in self.config["layers"] and "colormap" in self.config["layers"][layer_name]:
+        if (
+            layer_name in self.config["layers"]
+            and "colormap" in self.config["layers"][layer_name]
+        ):
             return self.config["layers"][layer_name]["colormap"]
         else:
             return "RdGy"
@@ -357,7 +381,10 @@ class Network:
 
         Note: +/- 2 represents infinity
         """
-        if layer_name in self.config["layers"] and "minmax" in self.config["layers"][layer_name]:
+        if (
+            layer_name in self.config["layers"]
+            and "minmax" in self.config["layers"][layer_name]
+        ):
             return self.config["layers"][layer_name]["minmax"]
         else:
             layer = self[layer_name]
@@ -388,13 +415,19 @@ class Network:
                     return (-2, +2)
 
     def _get_border_color(self, layer_name):
-        if layer_name in self.config["layers"] and "border_color" in self.config["layers"][layer_name]:
+        if (
+            layer_name in self.config["layers"]
+            and "border_color" in self.config["layers"][layer_name]
+        ):
             return self.config["layers"][layer_name]["border_color"]
         else:
             return self.config["border_color"]
 
     def _get_border_width(self, layer_name):
-        if layer_name in self.config["layers"] and "border_width" in self.config["layers"][layer_name]:
+        if (
+            layer_name in self.config["layers"]
+            and "border_width" in self.config["layers"][layer_name]
+        ):
             return self.config["layers"][layer_name]["border_width"]
         else:
             return self.config["border_width"]
@@ -429,55 +462,89 @@ class Network:
             return model.predict(inputs)
         except Exception as exc:
             input_tensors = self._intermediary_inputs[layer_name]
-            input_layers_in_order = self._get_input_layers_in_order(list(input_tensors.keys()))
-            input_layers_shapes = [self._get_raw_output_shape(layer_name) for layer_name in input_layers_in_order]
-            hints = ", ".join([("%s: %s" % (name, shape)) for name, shape in zip(input_layers_in_order, input_layers_shapes)])
-            raise Exception("You must supply the inputs for these banks in order and in the right shape: %s" % hints) from exc
+            input_layers_in_order = self._get_input_layers_in_order(
+                list(input_tensors.keys())
+            )
+            input_layers_shapes = [
+                self._get_raw_output_shape(layer_name)
+                for layer_name in input_layers_in_order
+            ]
+            hints = ", ".join(
+                [
+                    ("%s: %s" % (name, shape))
+                    for name, shape in zip(input_layers_in_order, input_layers_shapes)
+                ]
+            )
+            raise Exception(
+                "You must supply the inputs for these banks in order and in the right shape: %s"
+                % hints
+            ) from exc
 
     def _get_input_layers_in_order(self, layer_names):
         """
         Get the input layers in order
         """
-        return [layer_name for layer_name in self.input_bank_order
-                if layer_name in layer_names]
+        return [
+            layer_name
+            for layer_name in self.input_bank_order
+            if layer_name in layer_names
+        ]
 
-    def picture(
+    def take_picture(
         self,
         inputs=None,
         targets=None,
         show_error=False,
         show_targets=False,
-        format="svg",
+        format=None,
     ):
         """
         Create an SVG of the network given some inputs (optional).
 
         Arguments:
             inputs: input values to propagate
-            rotate (bool): rotate picture to horizontal
-            scale (float): scale the picture
+            targets: target values to show
             show_error (bool): show the output error in resulting picture
             show_targets (bool): show the targets in resulting picture
-            format (str): "html", "image", or "svg"
-            minmax (tuple): provide override for input range (layer 0 only)
+            format (str): optional "html", "image", or "svg"
 
         Examples:
             >>> net = Network("Picture", 2, 2, 1)
             >>> net.compile(error="mse", optimizer="adam")
-            >>> net.picture()
+            >>> net.take_picture()
             <IPython.core.display.HTML object>
-            >>> net.picture([.5, .5])
+            >>> net.take_picture([.5, .5])
             <IPython.core.display.HTML object>
-            >>> net.picture([.5, .5])
+            >>> net.take_picture([.5, .5])
             <IPython.core.display.HTML object>
         """
-        svg = self.to_svg(
-            inputs=inputs, targets=targets
-        )
-        if format == "svg":
+        try:
+            from IPython.display import HTML
+        except ImportError:
+            HTML = None
+
+        svg = self.to_svg(inputs=inputs, targets=targets)
+
+        if format is None:
+            try:
+                get_ipython()  # noqa: F821
+                format = "html"
+            except Exception:
+                format = "image"
+
+        if format == "html":
+            if HTML is not None:
+                return HTML(svg)
+            else:
+                raise Exception(
+                    "need to install `IPython` or use Network.take_picture(format='image')"
+                )
+        elif format == "svg":
             return svg
-        elif format == "pil":
+        elif format == "image":
             return svg_to_image(svg)
+        else:
+            raise ValueError("unable to convert to format %r" % format)
 
     def to_svg(self, inputs=None, targets=None):
         """
@@ -1323,7 +1390,7 @@ class Network:
         if perm_count < 70000:  # globally minimize
             permutations = itertools.product(*[perms(x) for x in ordering[1:]])
             # measure arrow distances for them all and find the shortest:
-            best = (10000000, None, None)
+            best = (10000000, None)
             for ordering in permutations:
                 ordering = (first_level,) + ordering
                 sum = 0.0
@@ -1435,21 +1502,20 @@ class Network:
                 #    # don't change cache if virtual... could take some time to rebuild cache
                 #    v = self.dataset.inputs[0]
                 # else:
+                # if False:  # FIXME not compiled
+                #    if len(self.input_bank_order) > 1:
+                #        v = []
+                #        for in_name in self.input_bank_order:
+                #            v.append(self.make_dummy_vector(in_name))
+                #    else:
+                #        in_layer_name = self.input_bank_order[0]
+                #        v = self.make_dummy_vector(in_layer_name)
                 if True:  # FIXME
-                    if len(self.input_bank_order) > 1:
-                        v = []
-                        for in_name in self.input_bank_order:
-                            v.append(self.make_dummy_vector(in_name))
-                    else:
-                        in_layer = [
-                            layer
-                            for layer in self._layers
-                            if self._get_layer_type(layer.name) == "input"
-                        ][0]
-                        v = self.make_dummy_vector(in_layer.name)
-                if True:  # self[layer_name].model: # FIXME
                     try:
-                        image = self._propagate_to_image(layer_name, v)
+                        # FIXME get one per output bank:
+                        image = self.make_image(
+                            layer_name, self.predict_to(v, layer_name)[0]
+                        )
                     except Exception:
                         image = self.make_image(
                             layer_name, np.array(self.make_dummy_vector(layer_name)),
