@@ -22,7 +22,7 @@ def test_squential():
 
     network = Network(model)
 
-    network.picture()
+    network.take_picture()
 
 
 def test_graph():
@@ -37,5 +37,5 @@ def test_graph():
 
     network = Network(model)
 
-    network.picture(format="pil")
-    network.picture(format="svg")
+    network.take_picture(format="image")
+    network.take_picture(format="svg")

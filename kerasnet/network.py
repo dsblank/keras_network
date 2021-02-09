@@ -53,7 +53,6 @@ class Network:
         self._level_ordering = self._get_level_ordering()
         # Build intermediary models:
         self._build_intermediary_models()
-        self.minmax = (0, 0)
         # For saving HTML for watchers
         self._svg = None
         self.config = {
@@ -91,6 +90,8 @@ class Network:
             # layer_name: {vshape, feature, keep_aspect_ratio, visible
             # colormap, minmax, border_color, border_width}
         }
+        # Set the minmax for each layer:
+        self.reset_minmax()
 
     def _build_intermediary_models(self):
         # for all layers, inputs to here:
@@ -452,6 +453,42 @@ class Network:
                         weights[w].shape,
                     )
         return retval
+
+    def reset_minmax(self):
+        """
+        Reset the minmax for each layer.
+        """
+        for layer in self._layers:
+            if layer.name not in self.config["layers"]:
+                self.config["layers"][layer.name] = {}
+            self.config["layers"][layer.name]["minmax"] = self._get_act_minmax(layer.name)
+
+    def set_minmax(self, inputs, reset=True):
+        """
+        Set minmax for each layer based on inputs.
+        """
+        if reset:
+            for layer in self._layers:
+                if layer.name not in self.config["layers"]:
+                    self.config["layers"][layer.name] = {}
+                self.config["layers"][layer.name]["minmax"] = (float("+inf"), float("-inf"))
+
+        for layer in self._layers:
+            outputs = self.predict_to(inputs, layer.name)
+            min_orig, max_orig = self.config["layers"][layer.name]["minmax"]
+            self.config["layers"][layer.name]["minmax"] = (
+                min(outputs.min(), min_orig),
+                max(outputs.max(), max_orig),
+            )
+
+    def predict_to_image(self, inputs, layer_name):
+        """
+        Propagate input patterns to a bank in the network and
+        turn it into an image.
+        """
+        model = self._intermediary_models[layer_name]
+        outputs = self.predict_to(inputs, layer_name)
+        return self.make_image(layer_name, outputs)
 
     def predict_to(self, inputs, layer_name):
         """
