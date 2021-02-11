@@ -273,11 +273,16 @@ class Network:
         """
         # Recursive; results in input_list of [(name, tensor), ...]
         for layer in self.incoming_layers(layer_name):
-            if self._get_layer_type(layer.name) == "input":
-                if layer.name not in [name for (name, tensor) in input_list]:
-                    input_list.append((layer.name, layer.input))
+            if layer.name in self._input_layer_names:
+                for layer_name in self._input_layer_names[layer.name]:
+                    if layer_name not in [name for (name, tensor) in input_list]:
+                        input_list.append((layer_name, self[layer_name].input))
             else:
-                self._get_input_tensors(layer.name, input_list)
+                if self._get_layer_type(layer.name) == "input":
+                    if layer.name not in [name for (name, tensor) in input_list]:
+                        input_list.append((layer.name, layer.input))
+                else:
+                    self._get_input_tensors(layer.name, input_list)
         return input_list
 
     def make_dummy_vector(self, layer_name, default_value=0.0):
