@@ -188,7 +188,7 @@ class Network:
                 % hints
             ) from exc
 
-    def predict_from(self, inputs, from_layer, to_layer):
+    def predict_from(self, inputs, to_layers):
         """
         Propagate patterns from one bank to another bank in the network.
         """
@@ -200,6 +200,7 @@ class Network:
         show_error=False,
         show_targets=False,
         format=None,
+        **config,
     ):
         """
         Create an SVG of the network given some inputs (optional).
@@ -225,6 +226,8 @@ class Network:
             from IPython.display import HTML
         except ImportError:
             HTML = None
+
+        self.config.update(config)
 
         svg = self.to_svg(inputs=inputs, targets=targets)
 
@@ -382,8 +385,9 @@ class Network:
         # If rotated, and has features, rotate it:
         if self.config.get("rotate", False):
             output_shape = self._get_output_shape(layer_name)
+            vshape = self.vshape(layer_name)
             if (isinstance(output_shape, tuple) and len(output_shape) >= 3) or (
-                self.vshape is not None and len(self.vshape) == 2
+                vshape is not None and len(vshape) == 2
             ):
                 image = image.rotate(90, expand=1)
         return image
