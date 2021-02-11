@@ -39,8 +39,9 @@ class Network:
     def __init__(self, model, **config):
         self._model = model
         # Place to put models between layers:
-        self._intermediary_models = {}
-        self._intermediary_inputs = {}
+        self._predict_models = {}
+        # Place to map layer to its input layers:
+        self._input_layer_names = {}
         # Get all of the layers, even implicit ones, in order:
         self._layers = topological_sort(self._model.layers)
         # Make a mapping of names to layers:
@@ -53,7 +54,7 @@ class Network:
         self._level_ordering = self._get_level_ordering()
         # Build intermediary models:
         # FIXME: build as needed
-        #self._build_intermediary_models()
+        self._build_predict_models()
         # For saving HTML for watchers
         self._svg = None
         self.config = {
@@ -151,37 +152,10 @@ class Network:
                         self.config["layers"][layer.name]["minmax"] = (min_new, max_new)
                     else:
                         # Don't let them be equal:
-                        self.config["layers"][layer.name]["minmax"] = (min_new - 1, max_new + 1)
-
-    def summary(self):
-        def spaces(text, size):
-            return ("%-" + str(size) + "s") % str(text)
-
-        print('Model: "%s"' % self._model.name)
-        print("-" * 98)
-        print(
-            spaces("Layer (type)", 31),
-            spaces("Output Shape", 20),
-            spaces("Param #", 11),
-            spaces("Incoming layers", 33),
-        )
-        print("=" * 98)
-        for layer in self._layers:
-            params = sum(
-                [reduce(operator.mul, x.shape, 1) for x in layer.trainable_weights]
-            )
-            print(
-                spaces("%s (%s)" % (layer.name, self._get_layer_class(layer.name)), 31),
-                spaces(self._get_raw_output_shape(layer.name), 20),
-                spaces(params, 11),
-                spaces(
-                    ("\n" + spaces("", 65)).join(
-                        [layer.name for layer in self.incoming_layers(layer.name)]
-                    ),
-                    33,
-                ),
-            )
-            print("-" * 98)
+                        self.config["layers"][layer.name]["minmax"] = (
+                            min_new - 1,
+                            max_new + 1,
+                        )
 
     def predict_to_image(self, inputs, layer_name):
         """
@@ -195,28 +169,29 @@ class Network:
         """
         Propagate input patterns to a bank in the network.
         """
-        model = self._intermediary_models[layer_name]
+        input_names = self._input_layer_names[layer_name]
+        model = self._predict_models[input_names, layer_name]
         try:
             return model.predict(inputs)
         except Exception as exc:
-            input_tensors = self._intermediary_inputs[layer_name]
-            input_layers_in_order = self._get_input_layers_in_order(
-                list(input_tensors.keys())
-            )
             input_layers_shapes = [
-                self._get_raw_output_shape(layer_name)
-                for layer_name in input_layers_in_order
+                self._get_raw_output_shape(layer_name) for layer_name in input_names
             ]
             hints = ", ".join(
                 [
                     ("%s: %s" % (name, shape))
-                    for name, shape in zip(input_layers_in_order, input_layers_shapes)
+                    for name, shape in zip(input_names, input_layers_shapes)
                 ]
             )
             raise Exception(
                 "You must supply the inputs for these banks in order and in the right shape: %s"
                 % hints
             ) from exc
+
+    def predict_from(self, inputs, from_layer, to_layer):
+        """
+        Propagate patterns from one bank to another bank in the network.
+        """
 
     def take_picture(
         self,
@@ -274,34 +249,36 @@ class Network:
         else:
             raise ValueError("unable to convert to format %r" % format)
 
-    def _build_intermediary_models(self):
+    def _build_predict_models(self):
         # for all layers, inputs to here:
         for layer in self._layers:
             if self._get_layer_type(layer.name) != "input":
-                input_map = self._get_input_tensors(layer.name, {})
-                inputs = list(input_map.values())
-                self._intermediary_inputs[layer.name] = input_map
-                self._intermediary_models[layer.name] = Model(
-                    inputs=inputs, outputs=self[layer.name].output,  # tensors  # tensor
+                inputs = self._get_input_tensors(layer.name, [])
+                input_names = [inp[0] for inp in inputs]
+                input_tensors = [inp[1] for inp in inputs]
+                self._input_layer_names[layer.name] = tuple(input_names)
+                self._predict_models[tuple(input_names), layer.name] = Model(
+                    inputs=input_tensors,
+                    outputs=self[layer.name].output,  # tensors, tensor
                 )
             else:
-                self._intermediary_inputs[layer.name] = {layer.name: layer.input}
-                self._intermediary_models[layer.name] = Model(
+                self._input_layer_names[layer.name] = tuple([layer.name])
+                self._predict_models[tuple([layer.name]), layer.name] = Model(
                     inputs=[layer.input], outputs=[layer.output],
                 )
 
-    def _get_input_tensors(self, layer_name, input_map):
+    def _get_input_tensors(self, layer_name, input_list):
         """
         Given a layer_name, return {input_layer_name: tensor}
         """
-        # Recursive; results in input_map
+        # Recursive; results in input_list of [(name, tensor), ...]
         for layer in self.incoming_layers(layer_name):
             if self._get_layer_type(layer.name) == "input":
-                if layer.name not in input_map:
-                    input_map[layer.name] = layer.input
+                if layer.name not in [name for (name, tensor) in input_list]:
+                    input_list.append((layer.name, layer.input))
             else:
-                self._get_input_tensors(layer.name, input_map)
-        return input_map
+                self._get_input_tensors(layer.name, input_list)
+        return input_list
 
     def make_dummy_vector(self, layer_name, default_value=0.0):
         """
@@ -475,7 +452,8 @@ class Network:
         activation = self._get_activation_name(layer)
         retval = "Layer: %s %r" % (
             html.escape(self[layer_name].name),
-            layer.__class__.__name__)
+            layer.__class__.__name__,
+        )
         if activation:
             retval += "\nActivation function: %s" % activation
         retval += "\nOutput range: %s" % (
@@ -1243,9 +1221,7 @@ class Network:
             if self.config["rotate"]:
                 scale_value = self.config["max_width"] / max(cheight, max_width)
             else:
-                scale_value = self.config["preferred_size"] / max(
-                    cheight, max_width
-                )
+                scale_value = self.config["preferred_size"] / max(cheight, max_width)
         # svg_scale = "%s%%" % int(scale_value * 100)
         scaled_width = max_width * scale_value
         scaled_height = cheight * scale_value
