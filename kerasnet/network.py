@@ -15,10 +15,12 @@ import math
 import operator
 
 import numpy as np
+import tensorflow as tf
 import tensorflow.keras.backend as K
 from matplotlib import cm
 from PIL import Image, ImageDraw
-from tensorflow.keras.models import Model
+from tensorflow.keras.layers import Dense, Input
+from tensorflow.keras.models import Model, Sequential
 
 from .utils import (
     get_error_colormap,
@@ -1647,3 +1649,51 @@ class Network:
             row_heights.append(row_height)
             max_width = max(max_width, row_width)  # of all rows
         return max_width, max_height, row_heights, images, image_dims
+
+
+class BackpropNetwork(Network):
+    def __init__(self, *layer_sizes, name="Backprop Network", activation="sigmoid"):
+        def make_name(index, total):
+            if index == total - 2:
+                return "output"
+            elif index == 0:
+                return "hidden"
+            else:
+                return "hidden_%d" % index
+
+        input_layer = Input(layer_sizes[0], name="input")
+        layers = [input_layer] + [
+            Dense(size, activation=activation, name=make_name(index, len(layer_sizes)))
+            for index, size in enumerate(layer_sizes[1:])
+        ]
+        model = Sequential(layers=layers, name=name)
+        model.compile(optimizer=self._get_optimizer(), loss="mse")
+        super().__init__(model)
+
+    def _get_optimizer(self):
+        # Get optimizer with some defaults
+        return tf.keras.optimizers.SGD(
+            learning_rate=0.1, momentum=0.9, nesterov=False, name="SGD"
+        )
+
+    def set_learning_rate(self, learning_rate):
+        """
+        Sometimes called `epsilon`.
+        """
+        self._model.optimizer.lr = learning_rate
+
+    def get_learning_rate(self):
+        """
+        Sometimes called `epsilon`.
+        """
+        return self._model.optimizer.lr
+
+    def get_momentum(self):
+        """
+        """
+        self._model.optimizer.momentum
+
+    def set_momentum(self, momentum):
+        """
+        """
+        self._model.optimizer.momentum = momentum
