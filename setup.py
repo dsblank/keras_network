@@ -48,6 +48,8 @@ setup_args = dict(
     long_description=long_description,
     long_description_content_type="text/markdown",
     packages=setuptools.find_packages(),
+    install_requires=["Pillow", "numpy", "tensorflow", "matplotlib"],
+    extras_require={"jupyter": ["ipywidgets", "IPython"]},
     python_requires=">=3.6",
     license="BSD-3-Clause",
     platforms="Linux, Mac OS X, Windows",

@@ -8,11 +8,11 @@
 #
 # ******************************************************
 
+import functools
 import html
 import itertools
 import math
 import operator
-from functools import reduce
 
 import numpy as np
 import tensorflow.keras.backend as K
@@ -53,7 +53,6 @@ class Network:
         # Get the best (shortest path) between layers:
         self._level_ordering = self._get_level_ordering()
         # Build intermediary models:
-        # FIXME: build as needed
         self._build_predict_models()
         # For saving HTML for watchers
         self._svg = None
@@ -75,6 +74,7 @@ class Network:
             "arrow_width": "2",
             "border_width": "2",
             "border_color": "black",
+            "background_color": "#B0C4DE",  # must use hex format here
             "show_targets": False,
             "show_error": False,
             "pixels_per_unit": 1,
@@ -165,14 +165,29 @@ class Network:
         outputs = self.predict_to(inputs, layer_name)
         return self.make_image(layer_name, outputs)
 
+    def _extract_inputs(self, inputs, input_names):
+        """
+        Get the input_names from the inputs
+        """
+        # inputs is either a dict or a list, where index matches
+        # the input banks.
+        if isinstance(inputs, dict):
+            return [inputs[name] for name in input_names]
+        else:
+            return [
+                inputs[index]
+                for index in [self.input_bank_order.index(name) for name in input_names]
+            ]
+
     def predict_to(self, inputs, layer_name):
         """
         Propagate input patterns to a bank in the network.
         """
         input_names = self._input_layer_names[layer_name]
         model = self._predict_models[input_names, layer_name]
+        input_vectors = self._extract_inputs(inputs, input_names)
         try:
-            return model.predict(inputs)
+            return model.predict(input_vectors)
         except Exception as exc:
             input_layers_shapes = [
                 self._get_raw_output_shape(layer_name) for layer_name in input_names
@@ -248,7 +263,7 @@ class Network:
         elif format == "svg":
             return svg
         elif format == "image":
-            return svg_to_image(svg)
+            return svg_to_image(svg, self.config)
         else:
             raise ValueError("unable to convert to format %r" % format)
 
@@ -583,6 +598,7 @@ class Network:
         svg = None
         for (template_name, dict) in struct:
             if template_name == "head_svg":
+                dict["background_color"] = self.config["background_color"]
                 svg = templates["head_svg"].format(**dict)
         # build the rest:
         for index in range(len(struct)):
@@ -1410,7 +1426,7 @@ class Network:
 
         # First level needs to be in bank_order, and cannot permutate:
         first_level = [(bank_name, False, []) for bank_name in self.input_bank_order]
-        perm_count = reduce(
+        perm_count = functools.reduce(
             operator.mul, [math.factorial(len(level)) for level in ordering[1:]]
         )
         if perm_count < 70000:  # globally minimize

@@ -14,6 +14,7 @@ import io
 import math
 
 import numpy as np
+from PIL import Image
 
 
 class Line:
@@ -183,9 +184,11 @@ def rescale_numpy_array(a, old_range, new_range, new_dtype, truncate=False):
         return (new_min + (a - old_min) * new_delta / old_delta).astype(new_dtype)
 
 
-def svg_to_image(svg, background=(255, 255, 255, 255)):
-    import cairosvg
-    from PIL import Image
+def svg_to_image(svg, config):
+    try:
+        import cairosvg
+    except ImportError as exc:
+        raise Exception("cairosvg is required to convert svg to an image") from exc
 
     if isinstance(svg, bytes):
         pass
@@ -196,9 +199,13 @@ def svg_to_image(svg, background=(255, 255, 255, 255)):
 
     image_bytes = cairosvg.svg2png(bytestring=svg)
     image = Image.open(io.BytesIO(image_bytes))
-    if background is not None:
+    if "background_color" in config:
         # create a blank image, with background:
-        canvas = Image.new("RGBA", image.size, background)
+        red = int(config["background_color"][1:3], 16)
+        green = int(config["background_color"][3:5], 16)
+        blue = int(config["background_color"][5:7], 16)
+        background_color = (red, green, blue, 255)
+        canvas = Image.new("RGBA", image.size, background_color)
         try:
             canvas.paste(image, mask=image)
         except Exception:
@@ -227,7 +234,7 @@ def get_templates(config):
     )
     arrow_rect = """<rect x="{rx}" y="{ry}" width="{rw}" height="{rh}" style="fill:white;stroke:none"><title>{tooltip}</title></rect>"""
     label_svg = """<text x="{x}" y="{y}" font-family="{font_family}" font-size="{font_size}" text-anchor="{text_anchor}" fill="{font_color}" alignment-baseline="central" {transform}>{label}</text>"""
-    svg_head = """<svg id='{id}' xmlns='http://www.w3.org/2000/svg' xmlns:xlink='http://www.w3.org/1999/xlink' image-rendering="pixelated" width="{top_width}px" height="{top_height}px">
+    svg_head = """<svg id='{id}' xmlns='http://www.w3.org/2000/svg' xmlns:xlink='http://www.w3.org/1999/xlink' image-rendering="pixelated" width="{top_width}px" height="{top_height}px" style="background-color: {background_color}">
  <g {transform}>
   <svg viewBox="0 0 {viewbox_width} {viewbox_height}" width="{width}px" height="{height}px">
     <defs>
