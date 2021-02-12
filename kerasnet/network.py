@@ -10,10 +10,12 @@
 
 import functools
 import html
+import io
 import itertools
 import math
 import operator
 
+import matplotlib.pyplot as plt
 import numpy as np
 import tensorflow as tf
 import tensorflow.keras.backend as K
@@ -22,7 +24,9 @@ from PIL import Image, ImageDraw
 from tensorflow.keras.layers import Dense, Input
 from tensorflow.keras.models import Model, Sequential
 
+from .callbacks import PlotCallback
 from .utils import (
+    get_argument_bindings,
     get_error_colormap,
     get_templates,
     image_to_uri,
@@ -158,6 +162,125 @@ class Network:
                             min_new - 1,
                             max_new + 1,
                         )
+
+    def fit(self, *args, **kwargs):
+        report_rate = 1
+        # plot = True
+        # if plot:
+        #    import matplotlib
+        #    mpl_backend = matplotlib.get_backend()
+        # else:
+        #    mpl_backend = None
+
+        plot_callback = PlotCallback(self, report_rate)
+        kwargs = get_argument_bindings(self._model.fit, args, kwargs)
+        # get callbacks, if any:
+        callbacks = kwargs.get("callbacks", None)
+        if callbacks is None:
+            callbacks = []
+        # add our plot callback to it:
+        callbacks.append(plot_callback)
+        kwargs["callbacks"] = callbacks
+        kwargs["verbose"] = 0
+        # call underlying model fit:
+        return self._model.fit(**kwargs)
+
+    def in_console(self, mpl_backend: str) -> bool:
+        """
+        Return True if running connected to a console; False if connected
+        to notebook, or other non-console system.
+
+        Possible values:
+            * 'TkAgg' - console with Tk
+            * 'Qt5Agg' - console with Qt
+            * 'MacOSX' - mac console
+            * 'module://ipykernel.pylab.backend_inline' - default for notebook and
+              non-console, and when using %matplotlib inline
+            * 'NbAgg' - notebook, using %matplotlib notebook
+
+        Here, None means not plotting, or just use text.
+
+        Note:
+            If you are running ipython without a DISPLAY with the QT
+            background, you may wish to:
+
+            export QT_QPA_PLATFORM='offscreen'
+        """
+        return mpl_backend not in [
+            "module://ipykernel.pylab.backend_inline",
+            "NbAgg",
+        ]
+
+    def plot_results(self, callback):
+        """
+        plots loss and accuracy on separate graphs, ignoring any other
+        metrics for now.
+        """
+        format = "svg"
+
+        metrics = [list(history[1].keys()) for history in callback._history]
+        metrics = set([item for sublist in metrics for item in sublist])
+
+        if callback._figure is not None:
+            # figure and axes objects have already been created
+            fig, loss_ax, acc_ax = callback._figure
+            loss_ax.clear()
+            if acc_ax is not None:
+                acc_ax.clear()
+        else:
+            # first time called, so create figure and axes objects
+            if "acc" in metrics or "val_acc" in metrics:
+                fig, (loss_ax, acc_ax) = plt.subplots(1, 2, figsize=(10, 4))
+            else:
+                fig, loss_ax = plt.subplots(1)
+                acc_ax = None
+            callback._figure = fig, loss_ax, acc_ax
+
+        def get_xy(name):
+            return [
+                (history[0], history[1][name])
+                for history in callback._history
+                if name in history[1]
+            ]
+
+        for metric in metrics:
+            xys = get_xy(metric)
+            x_values = [xy[0] for xy in xys]
+            y_values = [xy[1] for xy in xys]
+            if metric == "loss":
+                loss_ax.plot(x_values, y_values, label=metric, color="r")  # red
+            elif metric == "val_loss":
+                loss_ax.plot(x_values, y_values, label=metric, color="orange")
+            elif metric == "acc" and acc_ax is not None:
+                acc_ax.plot(x_values, y_values, label=metric, color="b")  # blue
+            elif metric == "val_acc" and acc_ax is not None:
+                acc_ax.plot(x_values, y_values, label=metric, color="c")  # cyan
+            # FIXME: add a chart for each metric
+            # else:
+            #    loss_ax.plot(x_values, y_values, label=metric)
+
+        loss_ax.set_ylim(bottom=0)
+        loss_ax.set_title("%s: Training Loss" % (self.name,))
+        loss_ax.set_xlabel("Epoch")
+        loss_ax.legend(loc="best")
+        if acc_ax is not None:
+            acc_ax.set_ylim([-0.1, 1.1])
+            acc_ax.set_title("%s: Traning Accuracy" % (self.name,))
+            acc_ax.set_xlabel("Epoch")
+            acc_ax.legend(loc="best")
+
+        if True or format == "svg":
+            # if (callback is not None and not callback.in_console) or format == "svg":
+            from IPython.display import HTML, clear_output, display
+
+            bytes = io.BytesIO()
+            plt.savefig(bytes, format="svg")
+            img_bytes = bytes.getvalue()
+            clear_output(wait=True)
+            display(HTML(img_bytes.decode()))
+        else:  # format is None
+            plt.pause(0.01)
+            # plt.show(block=False)
 
     def predict_to_image(self, inputs, layer_name):
         """
@@ -1650,6 +1773,36 @@ class Network:
             max_width = max(max_width, row_width)  # of all rows
         return max_width, max_height, row_heights, images, image_dims
 
+    def set_learning_rate(self, learning_rate):
+        """
+        Sometimes called `epsilon`.
+        """
+        if hasattr(self._model, "optimizer") and hasattr(self._model.optimizer, "lr"):
+            self._model.optimizer.lr = learning_rate
+
+    def get_learning_rate(self):
+        """
+        Sometimes called `epsilon`.
+        """
+        if hasattr(self._model, "optimizer") and hasattr(self._model.optimizer, "lr"):
+            return self._model.optimizer.lr.numpy()
+
+    def get_momentum(self):
+        """
+        """
+        if hasattr(self._model, "optimizer") and hasattr(
+            self._model.optimizer, "momentum"
+        ):
+            return self._model.optimizer.momentum.numpy()
+
+    def set_momentum(self, momentum):
+        """
+        """
+        if hasattr(self._model, "optimizer") and hasattr(
+            self._model.optimizer, "momentum"
+        ):
+            self._model.optimizer.momentum = momentum
+
 
 class BackpropNetwork(Network):
     def __init__(self, *layer_sizes, name="Backprop Network", activation="sigmoid"):
@@ -1667,33 +1820,11 @@ class BackpropNetwork(Network):
             for index, size in enumerate(layer_sizes[1:])
         ]
         model = Sequential(layers=layers, name=name)
-        model.compile(optimizer=self._get_optimizer(), loss="mse")
+        model.compile(optimizer=self._make_optimizer(), loss="mse")
         super().__init__(model)
 
-    def _get_optimizer(self):
+    def _make_optimizer(self):
         # Get optimizer with some defaults
         return tf.keras.optimizers.SGD(
             learning_rate=0.1, momentum=0.9, nesterov=False, name="SGD"
         )
-
-    def set_learning_rate(self, learning_rate):
-        """
-        Sometimes called `epsilon`.
-        """
-        self._model.optimizer.lr = learning_rate
-
-    def get_learning_rate(self):
-        """
-        Sometimes called `epsilon`.
-        """
-        return self._model.optimizer.lr
-
-    def get_momentum(self):
-        """
-        """
-        self._model.optimizer.momentum
-
-    def set_momentum(self, momentum):
-        """
-        """
-        self._model.optimizer.momentum = momentum

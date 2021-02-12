@@ -10,6 +10,7 @@
 
 import base64
 import html
+import inspect
 import io
 import math
 
@@ -379,3 +380,20 @@ def render_curve(start, struct, end_svg, config):
         points = list(reversed(points))
         svg_html = svgPath(config, points) + end_html
     return svg_html
+
+
+def get_argument_bindings(function, args, kwargs):
+    signature = inspect.signature(function)
+    binding = signature.bind(*args, **kwargs)
+
+    # Set default values for missing values:
+    binding.apply_defaults()
+    ignore_param_list = ["self"]
+    # Side-effect, remove ignored items:
+    [
+        binding.arguments.pop(item)
+        for item in ignore_param_list
+        if item in binding.arguments
+    ]
+    # Returns OrderedDict:
+    return binding.arguments
