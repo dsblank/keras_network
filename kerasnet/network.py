@@ -1848,7 +1848,7 @@ class BackpropNetwork(Network):
         def make_layer(index, layer_sizes, activation):
             name = make_name(index, len(layer_sizes))
             if index == 0:
-                return Input((layer_sizes[index],), name=name)
+                return Input(layer_sizes[index], name=name)
             elif layer_sizes[index] == 0:
                 return Flatten(name=name)
             else:
