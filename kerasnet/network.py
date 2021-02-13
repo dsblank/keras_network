@@ -62,6 +62,8 @@ class Network:
         self._build_predict_models()
         # For saving HTML for watchers
         self._svg = None
+        self._history = []
+        self._epoch = 0
         self.config = {
             "name": self._model.name,  # for svg title
             "class_id": "keras-network",  # for svg network classid
@@ -211,14 +213,17 @@ class Network:
             "NbAgg",
         ]
 
-    def plot_results(self, callback):
+    def plot_results(self, callback, logs, report_rate):
         """
         plots loss and accuracy on separate graphs, ignoring any other
         metrics for now.
         """
         format = "svg"
 
-        metrics = [list(history[1].keys()) for history in callback._history]
+        self._history.append((self._epoch, logs))
+        self._epoch += 1
+
+        metrics = [list(history[1].keys()) for history in self._history]
         metrics = set([item for sublist in metrics for item in sublist])
 
         if callback._figure is not None:
@@ -239,7 +244,7 @@ class Network:
         def get_xy(name):
             return [
                 (history[0], history[1][name])
-                for history in callback._history
+                for history in self._history
                 if name in history[1]
             ]
 
@@ -1805,7 +1810,8 @@ class Network:
 
 
 class BackpropNetwork(Network):
-    def __init__(self, *layer_sizes, name="BackpropNetwork", activation="sigmoid"):
+    def __init__(self, *layer_sizes, name="BackpropNetwork",
+                 activation="sigmoid", loss="mse", metrics=None):
         def make_name(index, total):
             if index == 0:
                 return "input"
@@ -1819,7 +1825,7 @@ class BackpropNetwork(Network):
         def make_layer(index, layer_sizes, activation):
             name = make_name(index, len(layer_sizes))
             if index == 0:
-                return Input(layer_sizes[index], name=name)
+                return Input((layer_sizes[index],), name=name)
             elif layer_sizes[index] == 0:
                 return Flatten(name=name)
             else:
@@ -1829,8 +1835,12 @@ class BackpropNetwork(Network):
             make_layer(index, layer_sizes, activation)
             for index in range(len(layer_sizes))
         ]
-        model = Sequential(layers=layers, name=name)
-        model.compile(optimizer=self._make_optimizer(), loss="mse")
+        current_layer = layers[0]
+        for layer in layers[1:]:
+            current_layer = layer(current_layer)
+        model = Model(inputs=layers[0], outputs=current_layer)
+        model.compile(optimizer=self._make_optimizer(), loss=loss,
+                      metrics=metrics)
         super().__init__(model)
 
     def _make_optimizer(self):

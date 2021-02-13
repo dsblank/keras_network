@@ -15,9 +15,8 @@ class PlotCallback(Callback):
     def __init__(self, network, report_rate):
         super().__init__()
         self._network = network
+        self._report_rate = report_rate
         self._figure = None
-        self._history = []
 
     def on_epoch_end(self, epoch, logs=None):
-        self._history.append((epoch, logs))
-        self._network.plot_results(self)
+        self._network.plot_results(self, logs, self._report_rate)
