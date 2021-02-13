@@ -22,7 +22,7 @@ import tensorflow.keras.backend as K
 from matplotlib import cm
 from PIL import Image, ImageDraw
 from tensorflow.keras.layers import Dense, Flatten, Input
-from tensorflow.keras.models import Model, Sequential
+from tensorflow.keras.models import Model
 
 from .callbacks import PlotCallback
 from .utils import (
@@ -313,9 +313,14 @@ class Network:
         """
         Propagate input patterns to a bank in the network.
         """
-        input_names = self._input_layer_names[layer_name]
-        model = self._predict_models[input_names, layer_name]
-        input_vectors = self._extract_inputs(inputs, input_names)
+        if len(self.input_bank_order) > 1:
+            input_names = self._input_layer_names[layer_name]
+            model = self._predict_models[input_names, layer_name]
+            input_vectors = self._extract_inputs(inputs, input_names)
+        else:
+            input_names = self.input_bank_order
+            model = self._predict_models[input_names, layer_name]
+            input_vectors = inputs
         try:
             return model.predict(input_vectors)
         except Exception as exc:
@@ -538,12 +543,14 @@ class Network:
         return image
 
     def _get_input_layers(self):
-        return [x.name for x in self._layers if self._get_layer_type(x.name) == "input"]
+        return tuple(
+            [x.name for x in self._layers if self._get_layer_type(x.name) == "input"]
+        )
 
     def _get_output_layers(self):
-        return [
-            x.name for x in self._layers if self._get_layer_type(x.name) == "output"
-        ]
+        return tuple(
+            [x.name for x in self._layers if self._get_layer_type(x.name) == "output"]
+        )
 
     def vshape(self, layer_name):
         """
@@ -1810,8 +1817,14 @@ class Network:
 
 
 class BackpropNetwork(Network):
-    def __init__(self, *layer_sizes, name="BackpropNetwork",
-                 activation="sigmoid", loss="mse", metrics=None):
+    def __init__(
+        self,
+        *layer_sizes,
+        name="BackpropNetwork",
+        activation="sigmoid",
+        loss="mse",
+        metrics=None,
+    ):
         def make_name(index, total):
             if index == 0:
                 return "input"
@@ -1839,8 +1852,7 @@ class BackpropNetwork(Network):
         for layer in layers[1:]:
             current_layer = layer(current_layer)
         model = Model(inputs=layers[0], outputs=current_layer)
-        model.compile(optimizer=self._make_optimizer(), loss=loss,
-                      metrics=metrics)
+        model.compile(optimizer=self._make_optimizer(), loss=loss, metrics=metrics)
         super().__init__(model)
 
     def _make_optimizer(self):
