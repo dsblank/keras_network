@@ -21,7 +21,7 @@ import tensorflow as tf
 import tensorflow.keras.backend as K
 from matplotlib import cm
 from PIL import Image, ImageDraw
-from tensorflow.keras.layers import Dense, Input
+from tensorflow.keras.layers import Dense, Flatten, Input
 from tensorflow.keras.models import Model, Sequential
 
 from .callbacks import PlotCallback
@@ -452,7 +452,7 @@ class Network:
         # self is a layer from here down:
 
         vshape = self.vshape(layer_name)
-        if vshape and vshape != self._get_output_shape():
+        if vshape and vshape != self._get_output_shape(layer_name):
             vector = vector.reshape(vshape)
         if len(vector.shape) > 2:
             # Drop dimensions of vector:
@@ -1805,19 +1805,29 @@ class Network:
 
 
 class BackpropNetwork(Network):
-    def __init__(self, *layer_sizes, name="Backprop Network", activation="sigmoid"):
+    def __init__(self, *layer_sizes, name="BackpropNetwork", activation="sigmoid"):
         def make_name(index, total):
-            if index == total - 2:
+            if index == 0:
+                return "input"
+            elif index == total - 1:
                 return "output"
-            elif index == 0:
+            elif index == 1:
                 return "hidden"
             else:
-                return "hidden_%d" % index
+                return "hidden_%d" % (index - 1)
 
-        input_layer = Input(layer_sizes[0], name="input")
-        layers = [input_layer] + [
-            Dense(size, activation=activation, name=make_name(index, len(layer_sizes)))
-            for index, size in enumerate(layer_sizes[1:])
+        def make_layer(index, layer_sizes, activation):
+            name = make_name(index, len(layer_sizes))
+            if index == 0:
+                return Input(layer_sizes[index], name=name)
+            elif layer_sizes[index] == 0:
+                return Flatten(name=name)
+            else:
+                return Dense(layer_sizes[index], activation=activation, name=name)
+
+        layers = [
+            make_layer(index, layer_sizes, activation)
+            for index in range(len(layer_sizes))
         ]
         model = Sequential(layers=layers, name=name)
         model.compile(optimizer=self._make_optimizer(), loss="mse")
