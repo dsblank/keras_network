@@ -15,6 +15,11 @@ import itertools
 import math
 import operator
 
+try:
+    from IPython.display import HTML, clear_output, display
+except ImportError:
+    HTML = None
+
 import matplotlib.pyplot as plt
 import numpy as np
 import tensorflow as tf
@@ -192,8 +197,8 @@ class Network:
         try:
             return self._model.fit(**kwargs)
         except KeyboardInterrupt:
-            print("Training interrupted")
             plt.close()
+            raise KeyboardInterrupt() from None
 
     def in_console(self, mpl_backend: str) -> bool:
         """
@@ -289,13 +294,16 @@ class Network:
 
         if True or format == "svg":
             # if (callback is not None and not callback.in_console) or format == "svg":
-            from IPython.display import HTML, clear_output, display
-
             bytes = io.BytesIO()
             plt.savefig(bytes, format="svg")
             img_bytes = bytes.getvalue()
-            clear_output(wait=True)
-            display(HTML(img_bytes.decode()))
+            if HTML is not None:
+                clear_output(wait=True)
+                display(HTML(img_bytes.decode()))
+            else:
+                raise Exception(
+                    "need to install `IPython` to display matplotlib plots"
+                )
         else:  # format is None
             plt.pause(0.01)
             # plt.show(block=False)
@@ -335,7 +343,7 @@ class Network:
             model = self._predict_models[input_names, layer_name]
             input_vectors = inputs
         try:
-            return model.predict(input_vectors)
+            return model.predict(np.array(input_vectors))
         except Exception as exc:
             input_layers_shapes = [
                 self._get_raw_output_shape(layer_name) for layer_name in input_names
@@ -355,6 +363,33 @@ class Network:
         """
         Propagate patterns from one bank to another bank in the network.
         """
+
+    def display_picture(
+        self,
+        inputs=None,
+        targets=None,
+        show_error=False,
+        show_targets=False,
+        format=None,
+        clear=True,
+        **config,
+    ):
+        picture = self.take_picture(
+            inputs=inputs,
+            targets=targets,
+            show_error=show_error,
+            show_targets=show_targets,
+            format=format,
+            **config)
+        if HTML is not None:
+            if clear:
+                clear_output(wait=True)
+            display(picture)
+        else:
+            raise Exception(
+                "need to install `IPython` or use Network.display_picture()"
+            )
+
 
     def take_picture(
         self,
@@ -385,14 +420,12 @@ class Network:
             >>> net.take_picture([.5, .5])
             <IPython.core.display.HTML object>
         """
-        try:
-            from IPython.display import HTML
-        except ImportError:
-            HTML = None
-
         self.config.update(config)
 
-        svg = self.to_svg(inputs=inputs, targets=targets)
+        try:
+            svg = self.to_svg(inputs=inputs, targets=targets)
+        except KeyboardInterrupt as exc:
+            raise KeyboardInterrupt() from None
 
         if format is None:
             try:
@@ -468,9 +501,6 @@ class Network:
         Given an activation name (or function), and an output vector, display
         make and return an image widget.
         """
-        # FIXME:
-        # self is a layer from here down:
-
         vshape = self.vshape(layer_name)
         if vshape and vshape != self._get_output_shape(layer_name):
             vector = vector.reshape(vshape)
@@ -1826,7 +1856,7 @@ class Network:
             self._model.optimizer.momentum = momentum
 
 
-class BackpropNetwork(Network):
+class SequentialNetwork(Network):
     def __init__(
         self,
         *layer_sizes,
@@ -1840,10 +1870,10 @@ class BackpropNetwork(Network):
                 return "input"
             elif index == total - 1:
                 return "output"
-            elif index == 1:
+            elif index == 1 and total == 3:
                 return "hidden"
             else:
-                return "hidden_%d" % (index - 1)
+                return "hidden_%d" % index
 
         def make_layer(index, layer_sizes, activation):
             name = make_name(index, len(layer_sizes))
