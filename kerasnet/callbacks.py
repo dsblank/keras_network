@@ -8,6 +8,7 @@
 #
 # ******************************************************
 
+import matplotlib.pyplot as plt
 from tensorflow.keras.callbacks import Callback
 
 
@@ -18,5 +19,12 @@ class PlotCallback(Callback):
         self._report_rate = report_rate
         self._figure = None
 
+    def on_train_begin(self, logs=None):
+        print("Training %s..." % self._network.name)
+
     def on_epoch_end(self, epoch, logs=None):
         self._network.plot_results(self, logs, self._report_rate)
+
+    def on_train_end(self, logs=None):
+        if self._figure is not None:
+            plt.close()

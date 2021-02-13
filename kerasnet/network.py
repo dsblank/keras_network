@@ -70,6 +70,10 @@ class Network:
             "id": "keras-network",  # for svg id
             "font_size": 12,  # for svg
             "font_family": "monospace",  # for svg
+            "font_color": "black",  # for svg
+            "font_color_dynamic": "red",  # for svg
+            "font_color_not_visible": "green",  # for svg
+            "font_color_layer_name": "blue",  # for svg
             "border_top": 25,  # for svg
             "border_bottom": 25,  # for svg
             "hspace": 150,  # for svg
@@ -185,7 +189,11 @@ class Network:
         kwargs["callbacks"] = callbacks
         kwargs["verbose"] = 0
         # call underlying model fit:
-        return self._model.fit(**kwargs)
+        try:
+            return self._model.fit(**kwargs)
+        except KeyboardInterrupt:
+            print("Training interrupted")
+            plt.close()
 
     def in_console(self, mpl_backend: str) -> bool:
         """
@@ -234,7 +242,12 @@ class Network:
                 acc_ax.clear()
         else:
             # first time called, so create figure and axes objects
-            if "acc" in metrics or "val_acc" in metrics:
+            if (
+                ("acc" in metrics)
+                or ("val_acc" in metrics)
+                or ("accuracy" in metrics)
+                or ("val_accuary" in metrics)
+            ):
                 fig, (loss_ax, acc_ax) = plt.subplots(1, 2, figsize=(10, 4))
             else:
                 fig, loss_ax = plt.subplots(1)
@@ -256,9 +269,9 @@ class Network:
                 loss_ax.plot(x_values, y_values, label=metric, color="r")  # red
             elif metric == "val_loss":
                 loss_ax.plot(x_values, y_values, label=metric, color="orange")
-            elif metric == "acc" and acc_ax is not None:
+            elif metric in ["acc", "accuracy"] and acc_ax is not None:
                 acc_ax.plot(x_values, y_values, label=metric, color="b")  # blue
-            elif metric == "val_acc" and acc_ax is not None:
+            elif metric in ["val_acc", "val_accuracy"] and acc_ax is not None:
                 acc_ax.plot(x_values, y_values, label=metric, color="c")  # cyan
             # FIXME: add a chart for each metric
             # else:
@@ -438,17 +451,14 @@ class Network:
                     self._get_input_tensors(layer.name, input_list)
         return input_list
 
-    def make_dummy_vector(self, layer_name, default_value=0.0):
+    def make_dummy_vector(self, layer_name):
         """
-        This is in the easy to use human format (list of lists ...)
         """
-        # layer = self[layer_name]
         shape = self._get_output_shape(layer_name)
-        # FIXME: for pictures give a vector
         if (shape is None) or (isinstance(shape, (list, tuple)) and None in shape):
-            v = np.ones(100) * default_value
+            v = np.random.rand(100)
         else:
-            v = np.ones(shape) * default_value
+            v = np.random.rand(*shape)
         lo, hi = self._get_act_minmax(layer_name)
         v *= (lo + hi) / 2.0
         return v
@@ -822,7 +832,7 @@ class Network:
                             "y": cheight + height / 2 + 2,
                             "label": "targets",
                             "font_size": self.config["font_size"],
-                            "font_color": "black",
+                            "font_color": self.config["font_color"],
                             "font_family": self.config["font_family"],
                             "text_anchor": "start",
                         },
@@ -871,7 +881,7 @@ class Network:
                             "y": cheight + height / 2 + 2,
                             "label": "error",
                             "font_size": self.config["font_size"],
-                            "font_color": "black",
+                            "font_color": self.config["font_color"],
                             "font_family": self.config["font_family"],
                             "text_anchor": "start",
                         },
@@ -948,7 +958,7 @@ class Network:
                                     "y": cheight + 15,
                                     "label": "[layer(s) not visible]",
                                     "font_size": self.config["font_size"],
-                                    "font_color": "green",
+                                    "font_color": self.config["font_color_not_visible"],
                                     "font_family": self.config["font_family"],
                                     "text_anchor": "start",
                                     "rotate": False,
@@ -1173,7 +1183,7 @@ class Network:
                             + 2,
                             "label": layer_name,
                             "font_size": self.config["font_size"],
-                            "font_color": "black",
+                            "font_color": self.config["font_color_layer_name"],
                             "font_family": self.config["font_family"],
                             "text_anchor": "start",
                         },
@@ -1198,7 +1208,7 @@ class Network:
                                     "y": positioning[layer_name]["y"] - 10 - 5,
                                     "label": features,
                                     "font_size": self.config["font_size"],
-                                    "font_color": "black",
+                                    "font_color": self.config["font_color"],
                                     "font_family": self.config["font_family"],
                                     "text_anchor": "start",
                                 },
@@ -1217,7 +1227,7 @@ class Network:
                                     + 5,
                                     "label": feature,
                                     "font_size": self.config["font_size"],
-                                    "font_color": "black",
+                                    "font_color": self.config["font_color"],
                                     "font_family": self.config["font_family"],
                                     "text_anchor": "start",
                                 },
@@ -1234,7 +1244,7 @@ class Network:
                                     "y": positioning[layer_name]["y"] + 5,
                                     "label": features,
                                     "font_size": self.config["font_size"],
-                                    "font_color": "black",
+                                    "font_color": self.config["font_color"],
                                     "font_family": self.config["font_family"],
                                     "text_anchor": "start",
                                 },
@@ -1253,7 +1263,7 @@ class Network:
                                     - 5,
                                     "label": feature,
                                     "font_size": self.config["font_size"],
-                                    "font_color": "black",
+                                    "font_color": self.config["font_color"],
                                     "font_family": self.config["font_family"],
                                     "text_anchor": "start",
                                 },
@@ -1270,7 +1280,7 @@ class Network:
                                 "y": positioning[layer_name]["y"] + 4,
                                 "label": "o",  # "&#10683;"
                                 "font_size": self.config["font_size"] * 2.0,
-                                "font_color": "black",
+                                "font_color": self.config["font_color"],
                                 "font_family": self.config["font_family"],
                                 "text_anchor": "start",
                             },
@@ -1291,7 +1301,7 @@ class Network:
                                 + (-1 if self.config["rotate"] else 0),
                                 "label": "x",  # "&#10683;"
                                 "font_size": self.config["font_size"] * 1.3,
-                                "font_color": "black",
+                                "font_color": self.config["font_color"],
                                 "font_family": self.config["font_family"],
                                 "text_anchor": "start",
                             },
@@ -1316,7 +1326,7 @@ class Network:
                             "y": cheight - 10,
                             "label": label,
                             "font_size": self.config["font_size"] * 2.0,
-                            "font_color": "red",
+                            "font_color": self.config["font_color_dynamic"],
                             "font_family": self.config["font_family"],
                             "text_anchor": "middle",
                         },
@@ -1331,7 +1341,7 @@ class Network:
                             "y": 10,
                             "label": label,
                             "font_size": self.config["font_size"] * 2.0,
-                            "font_color": "red",
+                            "font_color": self.config["font_color_dynamic"],
                             "font_family": self.config["font_family"],
                             "text_anchor": "middle",
                         },
@@ -1347,7 +1357,7 @@ class Network:
                         "y": cheight / 2,
                         "label": self.config["name"],
                         "font_size": self.config["font_size"] + 3,
-                        "font_color": "black",
+                        "font_color": self.config["font_color"],
                         "font_family": self.config["font_family"],
                         "text_anchor": "middle",
                     },
@@ -1362,7 +1372,7 @@ class Network:
                         "y": self.config["border_top"] / 2,
                         "label": self.config["name"],
                         "font_size": self.config["font_size"] + 3,
-                        "font_color": "black",
+                        "font_color": self.config["font_color"],
                         "font_family": self.config["font_family"],
                         "text_anchor": "middle",
                     },
@@ -1851,7 +1861,7 @@ class BackpropNetwork(Network):
         current_layer = layers[0]
         for layer in layers[1:]:
             current_layer = layer(current_layer)
-        model = Model(inputs=layers[0], outputs=current_layer)
+        model = Model(inputs=layers[0], outputs=current_layer, name=name)
         model.compile(optimizer=self._make_optimizer(), loss=loss, metrics=metrics)
         super().__init__(model)
 
