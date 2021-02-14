@@ -109,9 +109,12 @@ class Network:
             # layer_name: {vshape, feature, keep_aspect_ratio, visible
             # colormap, minmax, border_color, border_width}
         }
-        self.config.update(config)
+        # Setup layer config dicts:
+        self.config["layers"] = {layer.name: {} for layer in self._layers}
         # Set the minmax for each layer:
         self.initialize()
+        # Override minmax etc:
+        self.set_config(**config)
 
     def __getattr__(self, attr):
         return getattr(self._model, attr)
@@ -1824,6 +1827,40 @@ class Network:
             row_heights.append(row_height)
             max_width = max(max_width, row_width)  # of all rows
         return max_width, max_height, row_heights, images, image_dims
+
+    def set_config(self, **items):
+        """
+        Set one or more configurable item:
+        """
+        for item in items:
+            if item in self.config:
+                if item == "layers":
+                    self.set_config_layers(**self.config["layers"])
+                else:
+                    self.config[item] = items[item]
+            else:
+                raise AttributeError("no such config item: %r" % item)
+
+    def set_config_layers(self, **layers):
+        """
+        Set one or more configurable items in a layers:
+        """
+        for layer_name, items in layers.items():
+            self.set_config_layer(layer_name, **items)
+
+    def set_config_layer(self, layer_name, **items):
+        """
+        Set one or more configurable items in a layer:
+        """
+        if layer_name in self.config["layers"]:
+            for item in items:
+                if item in ["vshape", "feature", "keep_aspect_ratio", "visible",
+                            "colormap", "minmax", "border_color", "border_width"]:
+                    self.config["layers"][layer_name][item] = items[item]
+                else:
+                    raise AttributeError("no such config layer item: %r" % item)
+        else:
+            raise AttributeError("no such config layer: %r" % layer_name)
 
     def set_learning_rate(self, learning_rate):
         """
