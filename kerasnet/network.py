@@ -300,14 +300,6 @@ class Network:
             plt.pause(0.01)
             # plt.show(block=False)
 
-    def predict_to_image(self, inputs, layer_name):
-        """
-        Propagate input patterns to a bank in the network and
-        turn it into an image.
-        """
-        outputs = self.predict_to(inputs, layer_name)
-        return self.make_image(layer_name, outputs)
-
     def _extract_inputs(self, inputs, input_names):
         """
         Get the input_names from the inputs
@@ -322,9 +314,11 @@ class Network:
                 for index in [self.input_bank_order.index(name) for name in input_names]
             ]
 
-    def predict_to(self, inputs, layer_name):
+    def predict_to(self, inputs, layer_name, format="numpy"):
         """
         Propagate input patterns to a bank in the network.
+
+        * format: (str) "numpy", "list", or "image"
         """
         if len(self.input_bank_order) > 1:
             input_names = self._input_layer_names[layer_name]
@@ -335,7 +329,7 @@ class Network:
             model = self._predict_models[input_names, layer_name]
             input_vectors = inputs
         try:
-            return model.predict(input_vectors)
+            outputs = model.predict(input_vectors)
         except Exception as exc:
             input_layers_shapes = [
                 self._get_raw_output_shape(layer_name) for layer_name in input_names
@@ -350,6 +344,13 @@ class Network:
                 "You must supply the inputs for these banks in order and in the right shape: %s"
                 % hints
             ) from exc
+
+        if format == "numpy":
+            return outputs
+        elif format == "image":
+            return self.make_image(layer_name, outputs)
+        elif format == "list":
+            return outputs.tolist()
 
     def predict_from(self, inputs, to_layers):
         """
