@@ -15,11 +15,6 @@ import itertools
 import math
 import operator
 
-try:
-    from IPython.display import HTML, clear_output, display
-except ImportError:
-    HTML = None
-
 import matplotlib.pyplot as plt
 import numpy as np
 import tensorflow as tf
@@ -40,6 +35,11 @@ from .utils import (
     svg_to_image,
     topological_sort,
 )
+
+try:
+    from IPython.display import HTML, clear_output, display
+except ImportError:
+    HTML = None
 
 
 class Network:
@@ -304,9 +304,7 @@ class Network:
                 clear_output(wait=True)
                 display(HTML(img_bytes.decode()))
             else:
-                raise Exception(
-                    "need to install `IPython` to display matplotlib plots"
-                )
+                raise Exception("need to install `IPython` to display matplotlib plots")
         else:  # format is None
             plt.pause(0.01)
             # plt.show(block=False)
@@ -384,7 +382,8 @@ class Network:
             show_error=show_error,
             show_targets=show_targets,
             format=format,
-            **config)
+            **config,
+        )
         if HTML is not None:
             if clear:
                 clear_output(wait=True)
@@ -393,7 +392,6 @@ class Network:
             raise Exception(
                 "need to install `IPython` or use Network.display_picture()"
             )
-
 
     def take_picture(
         self,
@@ -428,7 +426,7 @@ class Network:
 
         try:
             svg = self.to_svg(inputs=inputs, targets=targets)
-        except KeyboardInterrupt as exc:
+        except KeyboardInterrupt:
             raise KeyboardInterrupt() from None
 
         if format is None:
@@ -1855,8 +1853,16 @@ class Network:
         """
         if layer_name in self.config["layers"]:
             for item in items:
-                if item in ["vshape", "feature", "keep_aspect_ratio", "visible",
-                            "colormap", "minmax", "border_color", "border_width"]:
+                if item in [
+                    "vshape",
+                    "feature",
+                    "keep_aspect_ratio",
+                    "visible",
+                    "colormap",
+                    "minmax",
+                    "border_color",
+                    "border_width",
+                ]:
                     self.config["layers"][layer_name][item] = items[item]
                 else:
                     raise AttributeError("no such config layer item: %r" % item)
