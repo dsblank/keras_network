@@ -15,6 +15,11 @@ import itertools
 import math
 import operator
 
+try:
+    from IPython.display import HTML, clear_output, display
+except ImportError:
+    HTML = None
+
 import matplotlib.pyplot as plt
 import numpy as np
 import tensorflow as tf
@@ -104,9 +109,12 @@ class Network:
             # layer_name: {vshape, feature, keep_aspect_ratio, visible
             # colormap, minmax, border_color, border_width}
         }
-        self.config.update(config)
+        # Setup layer config dicts:
+        self.config["layers"] = {layer.name: {} for layer in self._layers}
         # Set the minmax for each layer:
         self.initialize()
+        # Override minmax etc:
+        self.set_config(**config)
 
     def __getattr__(self, attr):
         return getattr(self._model, attr)
@@ -192,8 +200,8 @@ class Network:
         try:
             return self._model.fit(**kwargs)
         except KeyboardInterrupt:
-            print("Training interrupted")
             plt.close()
+            raise KeyboardInterrupt() from None
 
     def in_console(self, mpl_backend: str) -> bool:
         """
@@ -289,13 +297,16 @@ class Network:
 
         if True or format == "svg":
             # if (callback is not None and not callback.in_console) or format == "svg":
-            from IPython.display import HTML, clear_output, display
-
             bytes = io.BytesIO()
             plt.savefig(bytes, format="svg")
             img_bytes = bytes.getvalue()
-            clear_output(wait=True)
-            display(HTML(img_bytes.decode()))
+            if HTML is not None:
+                clear_output(wait=True)
+                display(HTML(img_bytes.decode()))
+            else:
+                raise Exception(
+                    "need to install `IPython` to display matplotlib plots"
+                )
         else:  # format is None
             plt.pause(0.01)
             # plt.show(block=False)
@@ -357,6 +368,33 @@ class Network:
         Propagate patterns from one bank to another bank in the network.
         """
 
+    def display_picture(
+        self,
+        inputs=None,
+        targets=None,
+        show_error=False,
+        show_targets=False,
+        format=None,
+        clear=True,
+        **config,
+    ):
+        picture = self.take_picture(
+            inputs=inputs,
+            targets=targets,
+            show_error=show_error,
+            show_targets=show_targets,
+            format=format,
+            **config)
+        if HTML is not None:
+            if clear:
+                clear_output(wait=True)
+            display(picture)
+        else:
+            raise Exception(
+                "need to install `IPython` or use Network.display_picture()"
+            )
+
+
     def take_picture(
         self,
         inputs=None,
@@ -386,14 +424,12 @@ class Network:
             >>> net.take_picture([.5, .5])
             <IPython.core.display.HTML object>
         """
-        try:
-            from IPython.display import HTML
-        except ImportError:
-            HTML = None
-
         self.config.update(config)
 
-        svg = self.to_svg(inputs=inputs, targets=targets)
+        try:
+            svg = self.to_svg(inputs=inputs, targets=targets)
+        except KeyboardInterrupt as exc:
+            raise KeyboardInterrupt() from None
 
         if format is None:
             try:
@@ -469,9 +505,6 @@ class Network:
         Given an activation name (or function), and an output vector, display
         make and return an image widget.
         """
-        # FIXME:
-        # self is a layer from here down:
-
         vshape = self.vshape(layer_name)
         if vshape and vshape != self._get_output_shape(layer_name):
             vector = vector.reshape(vshape)
@@ -1796,6 +1829,40 @@ class Network:
             max_width = max(max_width, row_width)  # of all rows
         return max_width, max_height, row_heights, images, image_dims
 
+    def set_config(self, **items):
+        """
+        Set one or more configurable item:
+        """
+        for item in items:
+            if item in self.config:
+                if item == "layers":
+                    self.set_config_layers(**self.config["layers"])
+                else:
+                    self.config[item] = items[item]
+            else:
+                raise AttributeError("no such config item: %r" % item)
+
+    def set_config_layers(self, **layers):
+        """
+        Set one or more configurable items in a layers:
+        """
+        for layer_name, items in layers.items():
+            self.set_config_layer(layer_name, **items)
+
+    def set_config_layer(self, layer_name, **items):
+        """
+        Set one or more configurable items in a layer:
+        """
+        if layer_name in self.config["layers"]:
+            for item in items:
+                if item in ["vshape", "feature", "keep_aspect_ratio", "visible",
+                            "colormap", "minmax", "border_color", "border_width"]:
+                    self.config["layers"][layer_name][item] = items[item]
+                else:
+                    raise AttributeError("no such config layer item: %r" % item)
+        else:
+            raise AttributeError("no such config layer: %r" % layer_name)
+
     def set_learning_rate(self, learning_rate):
         """
         Sometimes called `epsilon`.
@@ -1827,7 +1894,7 @@ class Network:
             self._model.optimizer.momentum = momentum
 
 
-class BackpropNetwork(Network):
+class SequentialNetwork(Network):
     def __init__(
         self,
         *layer_sizes,
@@ -1841,10 +1908,10 @@ class BackpropNetwork(Network):
                 return "input"
             elif index == total - 1:
                 return "output"
-            elif index == 1:
+            elif index == 1 and total == 3:
                 return "hidden"
             else:
-                return "hidden_%d" % (index - 1)
+                return "hidden_%d" % index
 
         def make_layer(index, layer_sizes, activation):
             name = make_name(index, len(layer_sizes))
